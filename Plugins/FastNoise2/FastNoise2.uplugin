@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "FastNoise2",
+	"Description": "FastNoise2 UE5 plugin",
+	"Category": "Other",
+	"CreatedBy": "Auburn",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "FastNoise2",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

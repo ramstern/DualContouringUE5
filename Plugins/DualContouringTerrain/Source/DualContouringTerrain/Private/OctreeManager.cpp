@@ -124,8 +124,8 @@ FVector3f child_offsets[8] =
 
 
 //for polling noise and QEF calculations, better scaled UE coordinates.
-static constexpr float scale_factor = 0.01f;
-static constexpr float inv_scale_factor = 1.f / scale_factor;
+constexpr float scale_factor = 0.01f;
+constexpr float inv_scale_factor = 1.f / scale_factor;
 
 OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node)
 {

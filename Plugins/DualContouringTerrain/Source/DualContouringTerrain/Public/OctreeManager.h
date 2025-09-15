@@ -6,7 +6,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "OctreeSettings.h"
 #include "OctreeNode.h"
-
+#include "RealtimeMeshComponent/Public/Interface/Core/RealtimeMeshKeys.h"
 #include "OctreeManager.generated.h"
 
 class UNoiseDataGenerator;
@@ -42,7 +42,8 @@ private:
 	OctreeNode* SetupOctree();
 
 	// recursive construction of child nodes
-	OctreeNode* ConstructChildNodes(OctreeNode*& parent);
+	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size);
+	OctreeNode* ConstructChildNodes(OctreeNode*& node);
 
 	// creation and data collection of leaf nodes
 	OctreeNode* ConstructLeafNode(OctreeNode*& node);
@@ -77,13 +78,18 @@ private:
 	// get normal via fdm 
 	FVector3f FDMGetNormal(FVector3f at_point);
 
+	// try to get current render camera
 	FVector GetActiveCameraLocation();
+
+	// get child index containing p from node position
+	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
 
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;
 	OctreeNode* root_node = nullptr;
 
-	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
+	FVector camera_pos = FVector();
+	uint8 last_visited_child_idx = 255ui8;
 
 #if UE_BUILD_DEBUG
 	struct dbg_edge
@@ -97,6 +103,7 @@ private:
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
 	URealtimeMeshSimple* octree_mesh = nullptr;
+	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
 
 	virtual void Tick(float DeltaTime) override;
 	TStatId GetStatId() const override;

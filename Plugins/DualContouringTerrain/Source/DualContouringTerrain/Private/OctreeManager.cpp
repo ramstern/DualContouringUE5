@@ -103,22 +103,14 @@ OctreeNode* UOctreeManager::SetupOctree()
 
 FVector3f child_offsets[8] =
 {
-	{-1.f, -1.f, -1.f},
-	{1.f, -1.f, -1.f},
-	{-1.f, -1.f, 1.f},
-	{1.f, -1.f, 1.f},
-	{-1.f, 1.f, -1.f},
-	{1.f, 1.f, -1.f},
-	{-1.f, 1.f, 1.f},
-	{1.f, 1.f, 1.f}
-	//{-1,-1,-1}, // 0:(0,0,0)
-	//{-1,-1, 1}, // 1:(0,0,1)
-	//{-1, 1,-1}, // 2:(0,1,0)
-	//{-1, 1, 1}, // 3:(0,1,1)
-	//{ 1,-1,-1}, // 4:(1,0,0)
-	//{ 1,-1, 1}, // 5:(1,0,1)
-	//{ 1, 1,-1}, // 6:(1,1,0)
-	//{ 1, 1, 1}  // 7:(1,1,1)
+	{-1,-1,-1}, // 0:(0,0,0)
+	{-1,-1, 1}, // 1:(0,0,1)
+	{-1, 1,-1}, // 2:(0,1,0)
+	{-1, 1, 1}, // 3:(0,1,1)
+	{ 1,-1,-1}, // 4:(1,0,0)
+	{ 1,-1, 1}, // 5:(1,0,1)
+	{ 1, 1,-1}, // 6:(1,1,0)
+	{ 1, 1, 1}  // 7:(1,1,1)
 };
 
 
@@ -129,12 +121,18 @@ constexpr float inv_scale_factor = 1.f / scale_factor;
 
 OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node)
 {
+	float node_size = SizeFromNodeDepth(node->depth);
+	return ConstructChildNodes(node, node_size);
+}
+
+OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_size)
+{
+	node->size = node_size;
+
 	if(node->depth == octree_settings->max_depth)
 	{
 		return ConstructLeafNode(node);
 	}
-
-	float node_size = SizeFromNodeDepth(node->depth);
 
 	bool has_children = false;
 
@@ -143,7 +141,7 @@ OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node)
 		OctreeNode* child = new OctreeNode();
 
 		child->depth = node->depth + 1;
-		child->center = node->center + child_offsets[i] * node_size * 0.25f;
+		child->center = node->center + child_offsets[i] * node->size * 0.25f;
 		node->children[i] = ConstructChildNodes(child);
 		node->child_mask |= static_cast<bool>(node->children[i]) << i;
 
@@ -176,7 +174,7 @@ constexpr unsigned char edges_corner_map[12][2] =
 OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node)
 {
 	const unsigned int MAX_ZERO_CROSSINGS = 6;
-
+	
 	TArray<float> corner_densities = SampleOctreeNodeDensities(node);
 
 	for (uint8_t i = 0; i < 8; i++)
@@ -199,7 +197,6 @@ OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node)
 	uint8 edge_count = 0;
 	quadric3 vox_pq;
 
-	float node_size = SizeFromNodeDepth(node->depth);
 	//UE_ASSUME(edge_count != 0);
 
 	for (size_t i = 0; i < 12 && edge_count < MAX_ZERO_CROSSINGS; i++)
@@ -210,8 +207,8 @@ OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node)
 		if (s1 == s2) continue;
 
 		//detected sign change on current edge
-		FVector3f corner_1 = child_offsets[edges_corner_map[i][0]]*node_size*0.5f + node->center;
-		FVector3f corner_2 = child_offsets[edges_corner_map[i][1]]*node_size*0.5f + node->center;
+		FVector3f corner_1 = child_offsets[edges_corner_map[i][0]]*node->size*0.5f + node->center;
+		FVector3f corner_2 = child_offsets[edges_corner_map[i][1]]*node->size*0.5f + node->center;
 
 		float d1 = corner_densities[edges_corner_map[i][0]] - octree_settings->iso_surface;
 		float d2 = corner_densities[edges_corner_map[i][1]] - octree_settings->iso_surface;
@@ -242,7 +239,7 @@ OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node)
 
 #if CLAMP_MINIMIZERS
 
-	float half_size = node_size * 0.5f * scale_factor;
+	float half_size = node->size * 0.5f * scale_factor;
 	FVector3f scaled_center = node->center * scale_factor;
 
 	if(node->leaf_data->minimizer.X > scaled_center.X + half_size)
@@ -286,7 +283,7 @@ TArray<float> UOctreeManager::SampleOctreeNodeDensities(OctreeNode* node)
 {
 	const float scaling_factor = 0.01f;
 
-	float half_node_size = SizeFromNodeDepth(node->depth) * scaling_factor * 0.5f;
+	float half_node_size = node->size * scaling_factor * 0.5f;
 
 	FVector3f node_center = node->center * scaling_factor;
 
@@ -326,8 +323,8 @@ void UOctreeManager::RebuildOctree()
 	DC_ProcessCell(root_node, builder);
 
 	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.LoadSynchronous());
-	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
 	octree_mesh->CreateSectionGroup(group_key, stream_set);
+	octree_mesh->UpdateSectionGroup(group_key, stream_set);
 }
 
 bool UOctreeManager::SimplifyOctree(OctreeNode* node)
@@ -681,7 +678,7 @@ void UOctreeManager::DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, Octr
 			unsigned char corner_2 = edge_corners[edge_idx][1];
 
 #if UE_BUILD_DEBUG
-			float node_half_size = SizeFromNodeDepth(edge_nodes[node_idx]->depth) * 0.5f;
+			float node_half_size = edge_nodes[node_idx]->size * 0.5f;
 			FVector3f corner_1_p = edge_nodes[node_idx]->center + child_offsets[corner_1] * node_half_size;
 			FVector3f corner_2_p = edge_nodes[node_idx]->center + child_offsets[corner_2] * node_half_size;
 
@@ -749,23 +746,21 @@ void UOctreeManager::DebugDrawOctree(OctreeNode* node)
 
 	FColor node_color = node->type ? FColor::Green : FColor::White;
 
-	float size = SizeFromNodeDepth(node->depth);
-
 	if(octree_settings->draw_leaves_only) 
 	{
 		if(node->type == 1)
 		{
-			DebugDrawNode(node, size, node_color);
+			DebugDrawNode(node, node->size, node_color);
 		}
 
 		if(octree_settings->draw_simplified_leaves && node->type == 2)
 		{
-			DebugDrawNode(node, size, FColor::Orange);
+			DebugDrawNode(node, node->size, FColor::Orange);
 		}
 	}
 	else 
 	{
-		DebugDrawNode(node, size, node_color);
+		DebugDrawNode(node, node->size, node_color);
 	}
 	
 	for (size_t i = 0; i < 8; i++)
@@ -866,9 +861,13 @@ FVector UOctreeManager::GetActiveCameraLocation()
 		}
 		
 	}
-	else 
+	else if(GCurrentLevelEditingViewportClient)
 	{
 		return GCurrentLevelEditingViewportClient->GetViewLocation();
+	}
+	else 
+	{
+		return FVector();
 	}
 #else 
 	return APlayerCameraManager * camera_manager = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0)->GetCameraLocation();
@@ -886,13 +885,70 @@ uint8 UOctreeManager::GetChildNodeFromPosition(FVector3f p, FVector3f node_cente
 	return (static_cast<uint8>(x) << 2) | (static_cast<uint8>(y) << 1) | static_cast<uint8>(z);
 }
 
-
 void UOctreeManager::Tick(float DeltaTime)
 {
 #if !UE_BUILD_SHIPPING
 	if(octree_settings->draw_octree) DebugDrawOctree(root_node);
 	if(octree_settings->draw_dc_data) DebugDrawDCData();
 #endif
+
+	// the dynamic octree construction loop
+
+	camera_pos = GetActiveCameraLocation();
+
+	uint8 extending_node_idx = GetChildNodeFromPosition(FVector3f(camera_pos), root_node->center);
+
+	//detect camera node change
+	if(last_visited_child_idx != extending_node_idx)
+	{
+		uint8 new_extending_node_idx;
+		uint8 flip;
+		do
+		{
+			float quarter_extending_node_size = root_node->size * 0.5f;
+			FVector3f new_center = root_node->center + child_offsets[extending_node_idx] * quarter_extending_node_size;
+
+			uint8 existing_node_idx = GetChildNodeFromPosition(root_node->center, new_center);
+			uint8 child_compute_mask = ~(1 << existing_node_idx);
+
+			OctreeNode* extending_node = new OctreeNode();
+			extending_node->center = new_center;
+			extending_node->depth = root_node->depth - 1;
+			extending_node->size = root_node->size * 2.f;
+
+			// assing the old root node to the new extending root child at existing_node_idx
+			extending_node->children[existing_node_idx] = root_node;
+
+			for (uint8 i = 0; i < 8; i++)
+			{
+				// selectively compute the remaining 7 nodes
+				if ((child_compute_mask >> i) & 1)
+				{
+					OctreeNode* extending_child = new OctreeNode();
+					extending_child->center = new_center + child_offsets[i] * quarter_extending_node_size;
+					extending_child->size = root_node->size;
+					extending_child->depth = root_node->depth;
+
+					extending_node->children[i] = extending_child;
+
+					ConstructChildNodes(extending_child);
+				}
+			}
+
+			root_node = extending_node;
+
+			//the node the camera is supposed to be in, when extended
+			new_extending_node_idx = GetChildNodeFromPosition(FVector3f(camera_pos), extending_node->center);
+
+			flip = ~new_extending_node_idx & 0b00000111;
+		}
+		while(extending_node_idx != flip);
+
+		//make sure the extending_node_idx is flipped this time, when we set last_visited to extending_node_idx
+		extending_node_idx = ~extending_node_idx & 0b00000111;
+	}
+
+	last_visited_child_idx = extending_node_idx;
 }
 
 TStatId UOctreeManager::GetStatId() const

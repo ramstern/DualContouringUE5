@@ -37,6 +37,7 @@ public:
 	unsigned char child_mask = 0;
 	unsigned char corners = 0;
 	DC_LeafData* leaf_data = nullptr;
+	float size;
 };
 
 constexpr uint32 INDEX_NOEXIST = MAX_uint32;

@@ -24,6 +24,18 @@ struct DC_LeafData
 	uint32 index;
 };
 
+struct DUALCONTOURINGTERRAIN_API StitchOctreeNode
+{
+	StitchOctreeNode() = default;
+	~StitchOctreeNode();
+
+	StitchOctreeNode* children[8] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+	int8 depth = 0;
+	unsigned char corners = 0;
+	unsigned char type = NODE_INTERNAL;
+	int32 tri_index;
+};
+
 struct DUALCONTOURINGTERRAIN_API OctreeNode
 {
 public:
@@ -32,7 +44,7 @@ public:
 
 	OctreeNode* children[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 	FVector3f center = FVector3f::ZeroVector;
-	uint8 depth = 0;
+	int8 depth = 0;
 	unsigned char type = NODE_INTERNAL;
 	unsigned char child_mask = 0;
 	unsigned char corners = 0;

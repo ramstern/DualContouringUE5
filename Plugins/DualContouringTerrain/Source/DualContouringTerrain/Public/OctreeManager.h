@@ -54,22 +54,34 @@ private:
 	// get node size from depth, could be tableized
 	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return octree_settings->initial_size / std::exp2f(static_cast<float>(depth)); };
 
-	// rebuild the octree
+	// rebuilds the entire octree
 	void RebuildOctree();
 
 	// simplify the octree with residual error
 	bool SimplifyOctree(OctreeNode* node);
 
 	// Build vertex buffer and assign indices to leaf data
-	void BuildVertexIndices(OctreeNode* node, MeshBuilder& builder);
+	void BuildMeshData(OctreeNode* node, MeshBuilder& builder);
+
+	void BuildStitchMeshData(OctreeNode* node, OctreeNode* parent, MeshBuilder& builder);
 
 	// DC polygonization methods
 	void DC_ProcessCell(OctreeNode* node, MeshBuilder& builder);
 	void DC_ProcessFace(OctreeNode* node_1, OctreeNode* node_2, unsigned char direction, MeshBuilder& builder);
 	void DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, OctreeNode* node_3, OctreeNode* node_4, unsigned char direction, MeshBuilder& builder);
 
+	// DC polygonization methods (seam)
+	void DC_ProcessCell(StitchOctreeNode* node, MeshBuilder& builder);
+	void DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* node_2, unsigned char direction, MeshBuilder& builder);
+	void DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* node_2, StitchOctreeNode* node_3, StitchOctreeNode* node_4, unsigned char direction, MeshBuilder& builder);
+
+	void PolygonizeAtDepth(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent, int8 depth);
+
+	//returns the root stitch node copy of start_node
+	StitchOctreeNode* ConstructSeamOctree(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent_node, MeshBuilder& builder);
+
 	//debug draw octree nodes
-	void DebugDrawOctree(OctreeNode* node);
+	void DebugDrawOctree(OctreeNode* node, int32 current_depth);
 	//debug draw dc data
 	void DebugDrawDCData();
 	void DebugDrawNode(OctreeNode* node, float size, FColor color);
@@ -83,6 +95,8 @@ private:
 
 	// get child index containing p from node position
 	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
+
+	OctreeNode* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth);
 
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;
@@ -103,7 +117,10 @@ private:
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
 	URealtimeMeshSimple* octree_mesh = nullptr;
-	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
+	TArray<FRealtimeMeshSectionGroupKey> mesh_group_keys;
+
+	//debug cam proxy actor
+	ADC_OctreeRenderActor* cam_proxy_actor = nullptr;
 
 	virtual void Tick(float DeltaTime) override;
 	TStatId GetStatId() const override;

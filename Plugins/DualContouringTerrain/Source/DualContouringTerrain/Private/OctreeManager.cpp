@@ -27,7 +27,7 @@ void UOctreeManager::Initialize(FSubsystemCollectionBase& Collection)
 	octree_settings = GetDefault<UOctreeSettings>();
 
 	noise_gen = GEngine->GetEngineSubsystem<UNoiseDataGenerator>();
-	
+
 	FActorSpawnParameters Params;
 	Params.Name = TEXT("DC_OctreeRenderActor");
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -43,6 +43,11 @@ void UOctreeManager::Initialize(FSubsystemCollectionBase& Collection)
 #endif
 		render_actor = created_render_actor;
 	}
+
+	Params.Name = TEXT("TestCameraProxy");
+	
+	cam_proxy_actor = GetWorld()->SpawnActor<ADC_OctreeRenderActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	
 
 #if WITH_EDITOR
 	UOctreeSettings::OnChanged().AddUObject(this, &UOctreeManager::RebuildOctree);
@@ -104,12 +109,12 @@ OctreeNode* UOctreeManager::SetupOctree()
 FVector3f child_offsets[8] =
 {
 	{-1,-1,-1}, // 0:(0,0,0)
-	{-1,-1, 1}, // 1:(0,0,1)
-	{-1, 1,-1}, // 2:(0,1,0)
-	{-1, 1, 1}, // 3:(0,1,1)
-	{ 1,-1,-1}, // 4:(1,0,0)
-	{ 1,-1, 1}, // 5:(1,0,1)
-	{ 1, 1,-1}, // 6:(1,1,0)
+	{1,-1, -1}, // 1:(0,0,1)
+	{-1, -1,1}, // 2:(0,1,0)
+	{1, -1, 1}, // 3:(0,1,1)
+	{ -1,1,-1}, // 4:(1,0,0)
+	{ 1, 1, -1}, // 5:(1,0,1)
+	{ -1, 1,1}, // 6:(1,1,0)
 	{ 1, 1, 1}  // 7:(1,1,1)
 };
 
@@ -319,12 +324,14 @@ void UOctreeManager::RebuildOctree()
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
 	builder.EnableTangents();
 
-	BuildVertexIndices(root_node, builder);
+	BuildMeshData(root_node, builder);
 	DC_ProcessCell(root_node, builder);
+
+	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", mesh_group_keys.Num()));
+	mesh_group_keys.Add(group_key);
 
 	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.LoadSynchronous());
 	octree_mesh->CreateSectionGroup(group_key, stream_set);
-	octree_mesh->UpdateSectionGroup(group_key, stream_set);
 }
 
 bool UOctreeManager::SimplifyOctree(OctreeNode* node)
@@ -407,21 +414,47 @@ bool UOctreeManager::SimplifyOctree(OctreeNode* node)
 	return true;
 }
 
-void UOctreeManager::BuildVertexIndices(OctreeNode* node, MeshBuilder& builder)
+void UOctreeManager::BuildMeshData(OctreeNode* node, MeshBuilder& builder)
 {
 	if(!node) return;
-
+	
 	if(node->type == NODE_INTERNAL)
 	{
-		for (size_t i = 0; i < 8; i++)
+		for (uint8 i = 0; i < 8; i++)
 		{
-			BuildVertexIndices(node->children[i], builder);
+			BuildMeshData(node->children[i], builder);
 		}
 	}
 	else 
 	{
-		node->leaf_data->index = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).GetIndex();
+		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		node->leaf_data->index = vertex.GetIndex();
 	}
+}
+
+
+
+void UOctreeManager::BuildStitchMeshData(OctreeNode* node, OctreeNode* parent, MeshBuilder& builder)
+{
+	// left x side
+	// AI gave me this self idea... interesting way to avoid declaring the lambda function
+	auto left_x_recurse = [&](auto&& self, OctreeNode* node, MeshBuilder& builder)
+	{
+		if(!node) return;
+
+		if(node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 0; i < 4; i++)
+			{
+				self(self, node->children[i], builder);
+			}
+		}
+		else 
+		{
+			builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		}
+	};
+	left_x_recurse(left_x_recurse, node, builder);	
 }
 
 constexpr unsigned char DIRECTION_X = 1;
@@ -740,34 +773,248 @@ void UOctreeManager::DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, Octr
 	}
 }
 
-void UOctreeManager::DebugDrawOctree(OctreeNode* node)
+void UOctreeManager::DC_ProcessCell(StitchOctreeNode* node, MeshBuilder& builder)
 {
-	if(!node) return;
+	if (!node) return;
 
-	FColor node_color = node->type ? FColor::Green : FColor::White;
-
-	if(octree_settings->draw_leaves_only) 
+	if (node->type == NODE_INTERNAL) // if node is internal
 	{
-		if(node->type == 1)
+		// recurse to each child 
+		for (size_t i = 0; i < 8; i++)
 		{
-			DebugDrawNode(node, node->size, node_color);
+			DC_ProcessCell(node->children[i], builder);
 		}
 
-		if(octree_settings->draw_simplified_leaves && node->type == 2)
+		//handles every interior face of the node
+		for (size_t i = 0; i < 12; i++)
 		{
-			DebugDrawNode(node, node->size, FColor::Orange);
+			StitchOctreeNode* child_1 = node->children[process_cell_face_nodes[i][0]];
+			StitchOctreeNode* child_2 = node->children[process_cell_face_nodes[i][1]];
+			DC_ProcessFace(child_1, child_2, process_cell_face_nodes[i][2], builder);
+		}
+
+		//interior 6 edges of this node
+		for (size_t i = 0; i < 6; i++)
+		{
+			StitchOctreeNode* child_1 = node->children[process_edge_nodes[i][0]];
+			StitchOctreeNode* child_2 = node->children[process_edge_nodes[i][1]];
+			StitchOctreeNode* child_3 = node->children[process_edge_nodes[i][2]];
+			StitchOctreeNode* child_4 = node->children[process_edge_nodes[i][3]];
+			DC_ProcessEdge(child_1, child_2, child_3, child_4, process_edge_nodes[i][4], builder);
 		}
 	}
-	else 
+}
+
+void UOctreeManager::DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* node_2, unsigned char direction, MeshBuilder& builder)
+{
+	if (!(node_1 && node_2)) return;
+
+	//either one of the nodes has children nodes
+	if (node_1->type == NODE_INTERNAL || node_2->type == NODE_INTERNAL)
 	{
-		DebugDrawNode(node, node->size, node_color);
+		// 4 face calls
+		for (size_t face_idx = 0; face_idx < 4; face_idx++)
+		{
+			StitchOctreeNode* face_node_1 = nullptr;
+			if (node_1->type == NODE_INTERNAL)
+			{
+				face_node_1 = node_1->children[process_face_direction_cells[direction][face_idx][0]];
+			}
+			else //node is a leaf / collapsed leaf 
+			{
+				face_node_1 = node_1;
+			}
+
+			StitchOctreeNode* face_node_2 = nullptr;
+			if (node_2->type == NODE_INTERNAL)
+			{
+				face_node_2 = node_2->children[process_face_direction_cells[direction][face_idx][1]];
+			}
+			else face_node_2 = node_2;
+
+			DC_ProcessFace(face_node_1, face_node_2, /*process_face_direction_cells[direction][face_idx][2]*/ direction, builder);
+		}
+
+		const unsigned char orders[2][4] =
+		{
+			{ 0, 0, 1, 1 },
+			{ 0, 1, 0, 1 },
+		};
+
+		StitchOctreeNode* face_nodes[2] = { node_1, node_2 };
+
+		// 4 edge calls, on the boundary between nodes
+		for (size_t edge_idx = 0; edge_idx < 4; edge_idx++)
+		{
+			StitchOctreeNode* edge_nodes[4];
+
+			/*bool node_1_is_leaf = node_1->type != NODE_INTERNAL;
+			bool node_2_is_leaf = node_2->type != NODE_INTERNAL;*/
+
+			unsigned char indices[4] =
+			{
+				process_face_edge_nodes[direction][edge_idx][1],
+				process_face_edge_nodes[direction][edge_idx][2],
+				process_face_edge_nodes[direction][edge_idx][3],
+				process_face_edge_nodes[direction][edge_idx][4]
+			};
+
+			const unsigned char* order = orders[process_face_edge_nodes[direction][edge_idx][0]];
+			for (size_t node_idx = 0; node_idx < 4; node_idx++)
+			{
+				if (face_nodes[order[node_idx]]->type != NODE_INTERNAL)
+				{
+					edge_nodes[node_idx] = face_nodes[order[node_idx]];
+				}
+				else
+				{
+					edge_nodes[node_idx] = face_nodes[order[node_idx]]->children[indices[node_idx]];
+				}
+			}
+
+			DC_ProcessEdge(edge_nodes[0], edge_nodes[1], edge_nodes[2], edge_nodes[3], process_face_edge_nodes[direction][edge_idx][5], builder);
+
+			/*if(node_1_is_leaf)
+			{
+				edge_node_1 = node_1;
+				edge_node_2 = node_1;
+			}
+			else
+			{
+				edge_node_1 = node_1->children[process_face_edge_nodes[direction][edge_idx][1]];
+				edge_node_2 = node_1->children[process_face_edge_nodes[direction][edge_idx][2]];
+			}
+
+			if(node_2_is_leaf)
+			{
+				edge_node_3 = node_2;
+				edge_node_4 = node_2;
+			}
+			else
+			{
+				edge_node_3 = node_2->children[process_face_edge_nodes[direction][edge_idx][3]];
+				edge_node_4 = node_2->children[process_face_edge_nodes[direction][edge_idx][4]];
+			}*/
+
+			//DC_ProcessEdge(edge_node_1, edge_node_2, edge_node_3, edge_node_4, process_face_edge_nodes[direction][edge_idx][5], builder);
+		}
 	}
-	
+}
+
+void UOctreeManager::DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* node_2, StitchOctreeNode* node_3, StitchOctreeNode* node_4, unsigned char direction, MeshBuilder& builder)
+{
+	if (!(node_1 && node_2 && node_3 && node_4)) return;
+
+	unsigned char types[4] = { node_1->type, node_2->type, node_3->type, node_4->type };
+	StitchOctreeNode* edge_nodes[4] = { node_1, node_2, node_3, node_4 };
+
+	if (types[0] && types[1] && types[2] && types[3])
+	{
+		//all nodes are leaves / collapsed, we can add to the polygon buffer
+
+		uint32 indices[4];
+		unsigned char sign_changes[4] = { 0, 0, 0, 0 };
+
+		// we only want to add quads for a smallest node that owns the edge
+		unsigned char lowest_depth = 0;
+		// used to idx into sign_changes
+		unsigned char minimal_node_idx = 0;
+
+		bool flip = false;
+
+		for (size_t node_idx = 0; node_idx < 4; node_idx++)
+		{
+			unsigned char edge_idx = node_edge[direction][node_idx];
+
+			unsigned char corner_1 = edge_corners[edge_idx][0];
+			unsigned char corner_2 = edge_corners[edge_idx][1];
+
+#if UE_BUILD_DEBUG
+			float node_half_size = edge_nodes[node_idx]->size * 0.5f;
+			FVector3f corner_1_p = edge_nodes[node_idx]->center + child_offsets[corner_1] * node_half_size;
+			FVector3f corner_2_p = edge_nodes[node_idx]->center + child_offsets[corner_2] * node_half_size;
+
+			dbg_edge edge;
+			edge.start = FVector(corner_1_p);
+			edge.end = FVector(corner_2_p);
+
+			debug_edges.Add(edge);
+#endif
+			unsigned char inside_1 = (edge_nodes[node_idx]->corners >> corner_1) & 1;
+			unsigned char inside_2 = (edge_nodes[node_idx]->corners >> corner_2) & 1;
+
+			indices[node_idx] = edge_nodes[node_idx]->tri_index;
+
+			sign_changes[node_idx] = inside_1 != inside_2;
+
+			if (edge_nodes[node_idx]->depth > lowest_depth)
+			{
+				lowest_depth = edge_nodes[node_idx]->depth;
+				minimal_node_idx = node_idx;
+				flip = static_cast<bool>(inside_1);
+			}
+		}
+
+		if (sign_changes[minimal_node_idx])
+		{
+			if (flip)
+			{
+				builder.AddTriangle(indices[0], indices[1], indices[3]);
+				builder.AddTriangle(indices[0], indices[3], indices[2]);
+			}
+			else
+			{
+				builder.AddTriangle(indices[0], indices[3], indices[1]);
+				builder.AddTriangle(indices[0], indices[2], indices[3]);
+			}
+		}
+	}
+	else
+	{
+		for (size_t i = 0; i < 2; i++)
+		{
+			StitchOctreeNode* next_edge_nodes[4];
+			for (size_t node_idx = 0; node_idx < 4; node_idx++)
+			{
+				if (types[node_idx])
+				{
+					//leaf
+					next_edge_nodes[node_idx] = edge_nodes[node_idx];
+				}
+				else
+				{
+					next_edge_nodes[node_idx] = edge_nodes[node_idx]->children[process_sub_edge_nodes[direction][i][node_idx]];
+				}
+			}
+
+			DC_ProcessEdge(next_edge_nodes[0], next_edge_nodes[1], next_edge_nodes[2], next_edge_nodes[3], process_sub_edge_nodes[direction][i][4], builder);
+		}
+	}
+}
+
+
+void UOctreeManager::DebugDrawOctree(OctreeNode* node, int32 current_depth)
+{
+	if(!node || current_depth == octree_settings->debug_draw_how_deep) return;
+
+	if(node->type == NODE_LEAF && octree_settings->draw_leaves) 
+	{
+		DebugDrawNode(node, node->size, FColor::Green);
+	}
+	else if(node->type == NODE_COLLAPSED_LEAF && octree_settings->draw_simplified_leaves) 
+	{
+		DebugDrawNode(node, node->size, FColor::Red);
+	}
+	else if(node->type == NODE_INTERNAL)
+	{
+		DebugDrawNode(node, node->size, FColor::White);
+	}
+
 	for (size_t i = 0; i < 8; i++)
 	{
 		if(node->children[i])
 		{
-			DebugDrawOctree(node->children[i]);
+			DebugDrawOctree(node->children[i], current_depth+1);
 		}
 	}
 }
@@ -785,14 +1032,7 @@ void UOctreeManager::DebugDrawDCData()
 
 void UOctreeManager::DebugDrawNode(OctreeNode* node, float size, FColor color)
 {
-	if (octree_settings->debug_draw_mode == EOctreeDebugDrawMode::Box)
-	{
-		DrawDebugBox(GetWorld(), FVector(node->center), FVector(size * 0.5f), color);
-	}
-	else
-	{
-		DrawDebugPoint(GetWorld(), FVector(node->center), 10.f, color);
-	}
+	DrawDebugBox(GetWorld(), FVector(node->center), FVector(size * 0.5f), color);
 }
 
 void UOctreeManager::DebugDrawNodeMinimizer(OctreeNode* node)
@@ -846,6 +1086,8 @@ FVector3f UOctreeManager::FDMGetNormal(FVector3f at_point)
 
 FVector UOctreeManager::GetActiveCameraLocation()
 {
+	return cam_proxy_actor->GetActorLocation();
+
 #if WITH_EDITOR
 	if (GEditor->IsPlaySessionInProgress())
 	{
@@ -882,15 +1124,29 @@ uint8 UOctreeManager::GetChildNodeFromPosition(FVector3f p, FVector3f node_cente
 
 	//x is 0b100, y 0b010, z 0b001
 
-	return (static_cast<uint8>(x) << 2) | (static_cast<uint8>(y) << 1) | static_cast<uint8>(z);
+	return (static_cast<uint8>(y) << 2) | (static_cast<uint8>(z) << 1) | static_cast<uint8>(x);
 }
+
+OctreeNode* UOctreeManager::GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth)
+{
+	OctreeNode* current = start;
+	while(current->depth != depth)
+	{
+		uint8 idx = GetChildNodeFromPosition(p, current->center);
+		current = current->children[idx];
+	}
+
+	return current;
+}
+
 
 void UOctreeManager::Tick(float DeltaTime)
 {
 #if !UE_BUILD_SHIPPING
-	if(octree_settings->draw_octree) DebugDrawOctree(root_node);
+	if(octree_settings->draw_octree) DebugDrawOctree(root_node, 0);
 	if(octree_settings->draw_dc_data) DebugDrawDCData();
 #endif
+
 
 	// the dynamic octree construction loop
 
@@ -898,6 +1154,9 @@ void UOctreeManager::Tick(float DeltaTime)
 
 	uint8 extending_node_idx = GetChildNodeFromPosition(FVector3f(camera_pos), root_node->center);
 
+	UE_LOG(LogTemp,Display, TEXT("%i"), extending_node_idx);
+
+	if(octree_settings->stop_dynamic_octree) return;
 	//detect camera node change
 	if(last_visited_child_idx != extending_node_idx)
 	{
@@ -921,7 +1180,7 @@ void UOctreeManager::Tick(float DeltaTime)
 
 			for (uint8 i = 0; i < 8; i++)
 			{
-				// selectively compute the remaining 7 nodes
+				// selectively make the remaining 7 nodes
 				if ((child_compute_mask >> i) & 1)
 				{
 					OctreeNode* extending_child = new OctreeNode();
@@ -929,13 +1188,76 @@ void UOctreeManager::Tick(float DeltaTime)
 					extending_child->size = root_node->size;
 					extending_child->depth = root_node->depth;
 
-					extending_node->children[i] = extending_child;
+					ConstructChildNodes(extending_child, extending_child->size);
 
-					ConstructChildNodes(extending_child);
+					extending_node->children[i] = extending_child;
 				}
+			}
+			
+			uint8 extending_depth = -extending_node->depth; 
+
+			int32 node_cache_size = 8 << (extending_depth-1);
+			TArray<OctreeNode*> node_cache;
+			node_cache.SetNumUninitialized(node_cache_size);
+
+			//fill node_cache at each 
+			for (uint8 i = 0; i < 8; i++)
+			{
+				node_cache[i*(extending_depth-1)];
 			}
 
 			root_node = extending_node;
+
+			//makes sure mesh groups get created at depth 0
+			for (uint8 i = 0; i < 8; i++)
+			{
+				// selectively mesh the remaining nodes
+				if((child_compute_mask >> i) & 1)
+				{
+					//subd until depth of meshing has been reached, then mesh
+					OctreeNode* extending_child = extending_node->children[i];
+					PolygonizeAtDepth(extending_child, i, extending_node, 0);
+				}
+			}
+
+
+
+			//RealtimeMesh::FRealtimeMeshStreamSet stitch_stream_set;
+			//
+			//
+
+			//MeshBuilder stitch_builder(stitch_stream_set);
+			//stitch_builder.EnableTangents();
+
+			////the least we can do is reserve the amount up front
+			///*stitch_builder.ReserveNumTriangles(total_children_tris);
+			//stitch_builder.ReserveNumVertices(total_children_verts);*/
+
+			////BuildMeshData(extending_node, stitch_builder);
+
+
+			////handles every interior face of the extending node
+			//for (size_t i = 0; i < 12; i++)
+			//{
+			//	OctreeNode* child_1 = extending_node->children[process_cell_face_nodes[i][0]];
+			//	OctreeNode* child_2 = extending_node->children[process_cell_face_nodes[i][1]];
+			//	DC_ProcessFace(child_1, child_2, process_cell_face_nodes[i][2], stitch_builder);
+			//}
+
+			////interior 6 edges of the extending node
+			//for (size_t i = 0; i < 6; i++)
+			//{
+			//	OctreeNode* child_1 = extending_node->children[process_edge_nodes[i][0]];
+			//	OctreeNode* child_2 = extending_node->children[process_edge_nodes[i][1]];
+			//	OctreeNode* child_3 = extending_node->children[process_edge_nodes[i][2]];
+			//	OctreeNode* child_4 = extending_node->children[process_edge_nodes[i][3]];
+			//	DC_ProcessEdge(child_1, child_2, child_3, child_4, process_edge_nodes[i][4], stitch_builder);
+			//}
+
+			//const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh_Stitch", mesh_group_keys.Num()));
+			//mesh_group_keys.Add(group_key);
+			//octree_mesh->CreateSectionGroup(group_key, stitch_stream_set);
+
 
 			//the node the camera is supposed to be in, when extended
 			new_extending_node_idx = GetChildNodeFromPosition(FVector3f(camera_pos), extending_node->center);
@@ -949,6 +1271,379 @@ void UOctreeManager::Tick(float DeltaTime)
 	}
 
 	last_visited_child_idx = extending_node_idx;
+}
+
+void UOctreeManager::PolygonizeAtDepth(OctreeNode* node, uint8 node_idx, OctreeNode* parent, int8 mesh_depth)
+{
+	if(!node) return;
+
+	if(node->depth == mesh_depth)
+	{
+		//polygonize octant mesh
+		RealtimeMesh::FRealtimeMeshStreamSet stream_set;
+		MeshBuilder builder(stream_set);
+		builder.EnableTangents();
+
+		BuildMeshData(node, builder);
+
+		DC_ProcessCell(node, builder);
+
+		////call method to walk down octant and construct seam octree 
+		StitchOctreeNode* stitched = ConstructSeamOctree(node, node_idx, parent, builder);
+
+		DC_ProcessCell(stitched,builder);
+
+		const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", mesh_group_keys.Num()));
+		mesh_group_keys.Add(group_key);
+		octree_mesh->CreateSectionGroup(group_key, stream_set);
+	}
+	else
+	{
+		//subdivide
+		for (uint8 i = 0; i < 8; i++)
+		{
+			PolygonizeAtDepth(node->children[i], i, node, mesh_depth);
+		}
+	}
+	
+}
+
+constexpr unsigned char z_backside_lookup[4] = { 0,4,2,6 };
+constexpr unsigned char z_frontside_lookup[4] = {1,5,3,7};
+constexpr unsigned char y_topside_lookup[4] = { 2,3,6,7 };
+constexpr unsigned char y_bottomside_lookup[4] = {0,1,4,5};
+
+StitchOctreeNode* UOctreeManager::ConstructSeamOctree(OctreeNode* from_node, uint8 node_idx, OctreeNode* parent, MeshBuilder& builder)
+{
+	// we need to walk down this with the normal octree nodes, 
+	// then construct the stitch nodes along the way and assign index to the stitch node and vertex to the builder
+	
+	//lambda amount could be dialed down with some tables
+
+	auto left_x_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if(!node) return nullptr;
+
+		bool did_exist = true;
+		if(!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+		
+		if(node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 0; i < 4; i++)
+			{
+				existing->children[i] = self(self, node->children[i], nullptr, builder);
+			}
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+
+	auto right_x_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if (!node) return nullptr;
+
+		bool did_exist = true;
+		if (!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+
+		if (node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 4; i < 8; i++)
+			{
+				existing->children[i] = self(self, node->children[i], nullptr, builder);
+			}
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+
+	auto back_z_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if (!node) return nullptr;
+
+		bool did_exist = true;
+		if (!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+
+		if (node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 0; i < 4; i++)
+			{
+				unsigned char idx = z_backside_lookup[i];
+
+				existing->children[idx] = self(self, node->children[idx], existing->children[idx], builder);
+			}
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+	
+	auto front_z_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if (!node) return nullptr;
+
+		bool did_exist = true;
+		if (!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+
+		if (node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 0; i < 4; i++)
+			{
+				unsigned char idx = z_frontside_lookup[i];
+
+				existing->children[idx] = self(self, node->children[idx], existing->children[idx], builder);
+			}
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+
+	auto top_y_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if (!node) return nullptr;
+
+		bool did_exist = true;
+		if (!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+
+		if (node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 0; i < 4; i++)
+			{
+				unsigned char idx = y_topside_lookup[i];
+
+				existing->children[idx] = self(self, node->children[idx], existing->children[idx], builder);
+			}
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+
+	auto bottom_y_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if (!node) return nullptr;
+
+		bool did_exist = true;
+		if (!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+
+		if (node->type == NODE_INTERNAL)
+		{
+			for (uint8 i = 0; i < 4; i++)
+			{
+				unsigned char idx = y_bottomside_lookup[i];
+
+				existing->children[idx] = self(self, node->children[idx], existing->children[idx], builder);
+			}
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+
+	auto corner_recurse = [&](auto&& self, OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder) -> StitchOctreeNode*
+	{
+		if(!node) return nullptr;
+
+		bool did_exist = true;
+		if(!existing)
+		{
+			existing = new StitchOctreeNode();
+			existing->corners = node->corners;
+			existing->depth = node->depth;
+			existing->type = node->type;
+			did_exist = false;
+		}
+		
+		if(node->type == NODE_INTERNAL)
+		{
+			existing->children[5] = self(self, node->children[5], nullptr, builder);
+			existing->children[7] = self(self, node->children[7], nullptr, builder);
+		}
+		else if(!did_exist)
+		{
+			const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+			existing->tri_index = vertex.GetIndex();
+		}
+
+		return existing;
+	};
+
+
+	//this node recursion (no special case needed)
+	StitchOctreeNode* stitch_main = left_x_recurse(left_x_recurse, from_node, nullptr, builder);
+	back_z_recurse(back_z_recurse, from_node, stitch_main, builder);
+	top_y_recurse(top_y_recurse, from_node, stitch_main, builder);
+
+	FVector3f left_query_p = from_node->center - FVector3f(0.f, from_node->size, 0.f);
+	FVector3f back_query_p = from_node->center - FVector3f(from_node->size, 0.f, 0.f);
+	FVector3f top_query_p = from_node->center + FVector3f(0.f, 0.f, from_node->size);
+	FVector3f corner_query_p = from_node->center - FVector3f(from_node->size, from_node->size, 0.f);
+
+	StitchOctreeNode* stitch_root = new StitchOctreeNode();
+	stitch_root->type = NODE_INTERNAL;
+	stitch_root->depth = from_node->depth-1;
+	stitch_root->corners = 0;
+
+	OctreeNode* left_neighbor = nullptr;
+	OctreeNode* back_neighbor = nullptr;
+	OctreeNode* top_neighbor = nullptr;
+	OctreeNode* corner_neighbor = nullptr;
+
+	//now, we need to get neighbor side nodes that lay next to from_node...
+	switch(node_idx)
+	{
+	case 0:
+
+		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
+		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
+		top_neighbor = parent->children[2];
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	case 1:
+
+		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
+		back_neighbor = parent->children[0];
+		top_neighbor = parent->children[3];
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	case 2:
+
+		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
+		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
+		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	case 3:
+
+		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
+		back_neighbor = parent->children[2];
+		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	case 4:
+
+		left_neighbor = parent->children[0];
+		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
+		top_neighbor = parent->children[6];
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	case 5:
+
+		left_neighbor = parent->children[1];
+		back_neighbor = parent->children[4];
+		top_neighbor = parent->children[7];
+		corner_neighbor = parent->children[0];
+
+		break;
+	case 6:
+
+		left_neighbor = parent->children[2];
+		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
+		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	case 7:
+
+		left_neighbor = parent->children[3];
+		back_neighbor = parent->children[6];
+		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
+		corner_neighbor = GetNodeFromPositionDepth(root_node, corner_query_p, from_node->depth);
+
+		break;
+	}
+
+	//border cases
+	if(left_neighbor == from_node) left_neighbor = nullptr;
+	if(back_neighbor == from_node) back_neighbor = nullptr;
+	if(top_neighbor == from_node) top_neighbor = nullptr;
+	if(corner_neighbor == from_node) corner_neighbor = nullptr;
+
+	StitchOctreeNode* stitch_left = right_x_recurse(right_x_recurse, left_neighbor, nullptr, builder);
+	StitchOctreeNode* stitch_back = front_z_recurse(front_z_recurse, back_neighbor, nullptr, builder);
+	StitchOctreeNode* stitch_top = bottom_y_recurse(bottom_y_recurse, top_neighbor, nullptr, builder);
+	StitchOctreeNode* stitch_corner = corner_recurse(corner_recurse, corner_neighbor, nullptr, builder);
+
+	stitch_root->children[5] = stitch_main;
+	stitch_root->children[1] = stitch_left;
+	stitch_root->children[0] = stitch_corner;
+	stitch_root->children[4] = stitch_back;
+	stitch_root->children[7] = stitch_top;
+
+	return stitch_root;
 }
 
 TStatId UOctreeManager::GetStatId() const

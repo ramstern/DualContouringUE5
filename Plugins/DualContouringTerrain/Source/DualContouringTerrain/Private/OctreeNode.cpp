@@ -5,11 +5,19 @@
 
 OctreeNode::~OctreeNode()
 {
-	for (size_t i = 0; i < 8; i++)
+	for (uint8 i = 0; i < 8; i++)
 	{
 		delete children[i];
 		children[i] = nullptr;
 	}
 
 	delete leaf_data;
+}
+
+StitchOctreeNode::~StitchOctreeNode()
+{
+	for (uint8 i = 0; i < 8; i++)
+	{
+		delete children[i];
+	}
 }

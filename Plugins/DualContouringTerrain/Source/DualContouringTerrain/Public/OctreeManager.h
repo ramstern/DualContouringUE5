@@ -75,10 +75,11 @@ private:
 	void DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* node_2, unsigned char direction, MeshBuilder& builder);
 	void DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* node_2, StitchOctreeNode* node_3, StitchOctreeNode* node_4, unsigned char direction, MeshBuilder& builder);
 
-	void PolygonizeAtDepth(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent, int8 depth);
+	void PolygonizeExtendingNode(OctreeNode* extending_node, uint8 existing_node_idx, int8 meshing_depth);
+	void IsolatedPolygonizeNode(OctreeNode* node, MeshBuilder& builder);
 
 	//returns the root stitch node copy of start_node
-	StitchOctreeNode* ConstructSeamOctree(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent_node, MeshBuilder& builder);
+	//StitchOctreeNode* ConstructSeamOctree(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent_node, MeshBuilder& builder);
 
 	//debug draw octree nodes
 	void DebugDrawOctree(OctreeNode* node, int32 current_depth);
@@ -97,6 +98,17 @@ private:
 	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
 
 	OctreeNode* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth);
+
+	// seam recursion functions
+	/*StitchOctreeNode* LeftRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
+	StitchOctreeNode* RightRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
+	StitchOctreeNode* BackRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
+	StitchOctreeNode* FrontRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
+	StitchOctreeNode* TopRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
+	StitchOctreeNode* BottomRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
+	StitchOctreeNode* CornerBarRecurse(OctreeNode* node, StitchOctreeNode* existing, unsigned char* bar_lookup, MeshBuilder& builder);
+	StitchOctreeNode* CornerMiniRecurse(OctreeNode* node, StitchOctreeNode* existing, unsigned char idx, MeshBuilder& builder);*/
+
 
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;

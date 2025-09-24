@@ -24,7 +24,7 @@ StitchOctreeNode* LeftRecurse(OctreeNode* node, StitchOctreeNode* existing, Mesh
 	{
 		for (uint8 i = 0; i < 4; i++)
 		{
-			existing->children[i] = LeftRecurse(node->children[i], nullptr, builder);
+			existing->children[i] = LeftRecurse(node->children[i], existing->children[i], builder);
 		}
 	}
 	else if (!did_exist)
@@ -54,7 +54,7 @@ StitchOctreeNode* RightRecurse(OctreeNode* node, StitchOctreeNode* existing, Mes
 	{
 		for (uint8 i = 4; i < 8; i++)
 		{
-			existing->children[i] = RightRecurse(node->children[i], nullptr, builder);
+			existing->children[i] = RightRecurse(node->children[i], existing->children[i], builder);
 		}
 	}
 	else if (!did_exist)
@@ -210,8 +210,8 @@ StitchOctreeNode* CornerBarRecurseTL(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[3] = CornerBarRecurseTL(node->children[3], nullptr, builder);
-		existing->children[2] = CornerBarRecurseTL(node->children[2], nullptr, builder);
+		existing->children[3] = CornerBarRecurseTL(node->children[3], existing->children[3], builder);
+		existing->children[2] = CornerBarRecurseTL(node->children[2], existing->children[2], builder);
 	}
 	else if (!did_exist)
 	{
@@ -237,8 +237,8 @@ StitchOctreeNode* CornerBarRecurseTR(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[6] = CornerBarRecurseTR(node->children[6], nullptr, builder);
-		existing->children[7] = CornerBarRecurseTR(node->children[7], nullptr, builder);
+		existing->children[6] = CornerBarRecurseTR(node->children[6], existing->children[6], builder);
+		existing->children[7] = CornerBarRecurseTR(node->children[7], existing->children[7], builder);
 	}
 	else if (!did_exist)
 	{
@@ -264,8 +264,8 @@ StitchOctreeNode* CornerBarRecurseTF(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[3] = CornerBarRecurseTF(node->children[3], nullptr, builder);
-		existing->children[7] = CornerBarRecurseTF(node->children[7], nullptr, builder);
+		existing->children[3] = CornerBarRecurseTF(node->children[3], existing->children[3], builder);
+		existing->children[7] = CornerBarRecurseTF(node->children[7], existing->children[7], builder);
 	}
 	else if (!did_exist)
 	{
@@ -291,8 +291,8 @@ StitchOctreeNode* CornerBarRecurseTB(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[2] = CornerBarRecurseTB(node->children[2], nullptr, builder);
-		existing->children[6] = CornerBarRecurseTB(node->children[6], nullptr, builder);
+		existing->children[2] = CornerBarRecurseTB(node->children[2], existing->children[2], builder);
+		existing->children[6] = CornerBarRecurseTB(node->children[6], existing->children[6], builder);
 	}
 	else if (!did_exist)
 	{
@@ -319,8 +319,8 @@ StitchOctreeNode* CornerBarRecurseBL(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[0] = CornerBarRecurseBL(node->children[0], nullptr, builder);
-		existing->children[1] = CornerBarRecurseBL(node->children[1], nullptr, builder);
+		existing->children[0] = CornerBarRecurseBL(node->children[0], existing->children[0], builder);
+		existing->children[1] = CornerBarRecurseBL(node->children[1], existing->children[1], builder);
 	}
 	else if (!did_exist)
 	{
@@ -346,8 +346,8 @@ StitchOctreeNode* CornerBarRecurseBR(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[4] = CornerBarRecurseBR(node->children[4], nullptr, builder);
-		existing->children[5] = CornerBarRecurseBR(node->children[5], nullptr, builder);
+		existing->children[4] = CornerBarRecurseBR(node->children[4], existing->children[4], builder);
+		existing->children[5] = CornerBarRecurseBR(node->children[5], existing->children[5], builder);
 	}
 	else if (!did_exist)
 	{
@@ -373,8 +373,8 @@ StitchOctreeNode* CornerBarRecurseBF(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[1] = CornerBarRecurseBF(node->children[1], nullptr, builder);
-		existing->children[5] = CornerBarRecurseBF(node->children[5], nullptr, builder);
+		existing->children[1] = CornerBarRecurseBF(node->children[1], existing->children[1], builder);
+		existing->children[5] = CornerBarRecurseBF(node->children[5], existing->children[5], builder);
 	}
 	else if (!did_exist)
 	{
@@ -400,8 +400,8 @@ StitchOctreeNode* CornerBarRecurseBB(OctreeNode* node, StitchOctreeNode* existin
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[0] = CornerBarRecurseBB(node->children[0], nullptr, builder);
-		existing->children[4] = CornerBarRecurseBB(node->children[4], nullptr, builder);
+		existing->children[0] = CornerBarRecurseBB(node->children[0], existing->children[0], builder);
+		existing->children[4] = CornerBarRecurseBB(node->children[4], existing->children[4], builder);
 	}
 	else if (!did_exist)
 	{
@@ -428,8 +428,8 @@ StitchOctreeNode* CornerBarRecurseVLB(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[0] = CornerBarRecurseBL(node->children[0], nullptr, builder);
-		existing->children[2] = CornerBarRecurseBL(node->children[2], nullptr, builder);
+		existing->children[0] = CornerBarRecurseVLB(node->children[0], existing->children[0], builder);
+		existing->children[2] = CornerBarRecurseVLB(node->children[2], existing->children[2], builder);
 	}
 	else if (!did_exist)
 	{
@@ -455,8 +455,8 @@ StitchOctreeNode* CornerBarRecurseVRB(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[6] = CornerBarRecurseBR(node->children[4], nullptr, builder);
-		existing->children[4] = CornerBarRecurseBR(node->children[5], nullptr, builder);
+		existing->children[4] = CornerBarRecurseVRB(node->children[4], existing->children[4], builder);
+		existing->children[6] = CornerBarRecurseVRB(node->children[6], existing->children[6], builder);
 	}
 	else if (!did_exist)
 	{
@@ -482,8 +482,8 @@ StitchOctreeNode* CornerBarRecurseVLF(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[3] = CornerBarRecurseBF(node->children[1], nullptr, builder);
-		existing->children[1] = CornerBarRecurseBF(node->children[5], nullptr, builder);
+		existing->children[1] = CornerBarRecurseVLF(node->children[1], existing->children[1], builder);
+		existing->children[3] = CornerBarRecurseVLF(node->children[3], existing->children[3], builder);
 	}
 	else if (!did_exist)
 	{
@@ -509,8 +509,8 @@ StitchOctreeNode* CornerBarRecurseVRF(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[7] = CornerBarRecurseBB(node->children[0], nullptr, builder);
-		existing->children[5] = CornerBarRecurseBB(node->children[4], nullptr, builder);
+		existing->children[7] = CornerBarRecurseVRF(node->children[7], existing->children[7], builder);
+		existing->children[5] = CornerBarRecurseVRF(node->children[5], existing->children[5], builder);
 	}
 	else if (!did_exist)
 	{
@@ -537,7 +537,7 @@ StitchOctreeNode* CornerMiniRecurse_0(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[0] = CornerMiniRecurse_0(node->children[0], nullptr, builder);
+		existing->children[0] = CornerMiniRecurse_0(node->children[0], existing->children[0], builder);
 	}
 	else if (!did_exist)
 	{
@@ -563,7 +563,7 @@ StitchOctreeNode* CornerMiniRecurse_1(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[1] = CornerMiniRecurse_1(node->children[1], nullptr, builder);
+		existing->children[1] = CornerMiniRecurse_1(node->children[1], existing->children[1], builder);
 	}
 	else if (!did_exist)
 	{
@@ -589,7 +589,7 @@ StitchOctreeNode* CornerMiniRecurse_2(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[2] = CornerMiniRecurse_2(node->children[2], nullptr, builder);
+		existing->children[2] = CornerMiniRecurse_2(node->children[2], existing->children[2], builder);
 	}
 	else if (!did_exist)
 	{
@@ -615,7 +615,7 @@ StitchOctreeNode* CornerMiniRecurse_3(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[3] = CornerMiniRecurse_3(node->children[3], nullptr, builder);
+		existing->children[3] = CornerMiniRecurse_3(node->children[3], existing->children[3], builder);
 	}
 	else if (!did_exist)
 	{
@@ -641,7 +641,7 @@ StitchOctreeNode* CornerMiniRecurse_4(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[4] = CornerMiniRecurse_4(node->children[4], nullptr, builder);
+		existing->children[4] = CornerMiniRecurse_4(node->children[4], existing->children[4], builder);
 	}
 	else if (!did_exist)
 	{
@@ -667,7 +667,7 @@ StitchOctreeNode* CornerMiniRecurse_5(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[5] = CornerMiniRecurse_5(node->children[5], nullptr, builder);
+		existing->children[5] = CornerMiniRecurse_5(node->children[5], existing->children[5], builder);
 	}
 	else if (!did_exist)
 	{
@@ -693,7 +693,7 @@ StitchOctreeNode* CornerMiniRecurse_6(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[6] = CornerMiniRecurse_6(node->children[6], nullptr, builder);
+		existing->children[6] = CornerMiniRecurse_6(node->children[6], existing->children[6], builder);
 	}
 	else if (!did_exist)
 	{
@@ -719,7 +719,7 @@ StitchOctreeNode* CornerMiniRecurse_7(OctreeNode* node, StitchOctreeNode* existi
 
 	if (node->type == NODE_INTERNAL)
 	{
-		existing->children[7] = CornerMiniRecurse_7(node->children[7], nullptr, builder);
+		existing->children[7] = CornerMiniRecurse_7(node->children[7], existing->children[7], builder);
 	}
 	else if (!did_exist)
 	{

@@ -1308,7 +1308,7 @@ void UOctreeManager::PolygonizeExtendingNode(OctreeNode* extending_node, uint8 e
 		MeshBuilder builders[8] = {MeshBuilder(stream_sets[0]), MeshBuilder(stream_sets[1]), MeshBuilder(stream_sets[2]), MeshBuilder(stream_sets[3]),
 								   MeshBuilder(stream_sets[4]), MeshBuilder(stream_sets[5]), MeshBuilder(stream_sets[6]), MeshBuilder(stream_sets[7])};
 		
-		//isolate polygonize
+		//isolate polygonize, no seam generation yet
 		for (uint8 i = 0; i < 8; i++)
 		{
 			if (i == existing_node_idx) continue;
@@ -1318,19 +1318,20 @@ void UOctreeManager::PolygonizeExtendingNode(OctreeNode* extending_node, uint8 e
 			IsolatedPolygonizeNode(extending_node->children[i], builders[i]);
 		}
 
+		//for each of the mirrored node in the pair, construct seams that handle an X, Y and Z face inwards towards the new extending node center.
 		StitchOctreeNode* stitch_root[2];
 		for (uint8 i = 0; i < 2; i++)
 		{
 			stitch_root[i] = new StitchOctreeNode();
 			stitch_root[i]->type = NODE_INTERNAL;
-			stitch_root[i]->depth = extending_node->depth;
+			stitch_root[i]->depth = mesh_depth - 1; //only in this case
 			stitch_root[i]->corners = 0;
 
 			StitchOctreeNode* stitch_main = own_seam_operations[pair[i]][0](extending_node->children[pair[i]], nullptr, builders[pair[i]]);
 											own_seam_operations[pair[i]][1](extending_node->children[pair[i]], stitch_main, builders[pair[i]]);
 											own_seam_operations[pair[i]][2](extending_node->children[pair[i]], stitch_main, builders[pair[i]]);
 
-			stitch_root[i]->children[pair[0]] = stitch_main;
+			stitch_root[i]->children[pair[i]] = stitch_main;
 
 			for (uint8 j = 0; j < 8; j++)
 			{

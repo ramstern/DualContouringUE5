@@ -15,6 +15,7 @@ ADC_OctreeRenderActor::ADC_OctreeRenderActor()
 
 	mesh_component = CreateDefaultSubobject<URealtimeMeshComponent>(TEXT("RealtimeMesh"));
 	mesh_component->SetupAttachment(RootComponent);
+	mesh_component->bCastShadowAsTwoSided = true;
 }
 
 // Called when the game starts or when spawned

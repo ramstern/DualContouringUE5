@@ -12,8 +12,6 @@
 #include "RealtimeMeshComponent.h"
 #include "RealtimeMeshSimple.h"
 #include "DC_OctreeRenderActor.h"
-#include "Kismet/GameplayStatics.h"
-#include "LevelEditorViewport.h"
 
 using uemath = pq::math<float, FVector3f, FVector3f, FMatrix3x3>;
 
@@ -42,21 +40,12 @@ void UOctreeManager::Initialize(FSubsystemCollectionBase& Collection)
 		created_render_actor->SetActorLabel(TEXT("Octree Render (Transient)"));
 #endif
 		render_actor = created_render_actor;
-	}
+	}		
 
-	Params.Name = TEXT("TestCameraProxy");
-	
-	cam_proxy_actor = GetWorld()->SpawnActor<ADC_OctreeRenderActor>(FVector(50.f, 50.f, 50.f), FRotator::ZeroRotator, Params);
-	
-
-#if WITH_EDITOR
-	UOctreeSettings::OnChanged().AddUObject(this, &UOctreeManager::RebuildOctree);
-#endif
 
 	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &UOctreeManager::PostWorldInit);
 
 	octree_mesh = render_actor->mesh_component->InitializeRealtimeMesh<URealtimeMeshSimple>();
-	RebuildOctree();
 }
 
 void UOctreeManager::Deinitialize()
@@ -66,9 +55,6 @@ void UOctreeManager::Deinitialize()
 #if WITH_EDITOR
 	UOctreeSettings::OnChanged().RemoveAll(this);
 #endif
-
-	delete root_node;
-	root_node = nullptr;
 
 	render_actor->Destroy();
 	render_actor = nullptr;
@@ -81,30 +67,6 @@ void UOctreeManager::PostWorldInit(UWorld* World, const UWorld::InitializationVa
 	//stupid rmc bug where materials do not apply after creation? this fixes it
 	render_actor->mesh_component->ReregisterComponent();
 }
-
-
-OctreeNode* UOctreeManager::SetupOctree()
-{
-	OctreeNode* initial_root_node = new OctreeNode();
-	initial_root_node->center = FVector3f(octree_settings->initial_size*0.5f, octree_settings->initial_size*0.5f, octree_settings->initial_size*0.5f);
-	initial_root_node->depth = 0;
-
-	ConstructChildNodes(initial_root_node);
-
-	return initial_root_node;
-}
-
-//FVector3f child_offsets[8] = 
-//{
-//	{1.f, -1.f, -1.f}, 
-//	{1.f, 1.f, -1.f},
-//	{-1.f, 1.f, -1.f},
-//	{-1.f, -1.f, -1.f},
-//	{1.f, -1.f, 1.f},
-//	{1.f, 1.f, 1.f},
-//	{-1.f, 1.f, 1.f},
-//	{-1.f, -1.f, 1.f}
-//};
 
 FVector3f child_offsets[8] =
 {
@@ -308,7 +270,7 @@ TArray<float> UOctreeManager::SampleOctreeNodeDensities(OctreeNode* node)
 	return noise_gen->GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 8);
 }
 
-void UOctreeManager::RebuildOctree()
+OctreeNode* UOctreeManager::BuildOctree(FVector3f center)
 {
 #if UE_BUILD_DEBUG
 	debug_edges.Empty();
@@ -316,22 +278,27 @@ void UOctreeManager::RebuildOctree()
 
 	octree_mesh->Reset();
 
-	delete root_node;
-	root_node = SetupOctree();
-	if(octree_settings->simplify) SimplifyOctree(root_node);
+	OctreeNode* root = new OctreeNode();
+	root->center = center;
+	root->depth = 0;
+
+	ConstructChildNodes(root);
+
+	if(octree_settings->simplify) SimplifyOctree(root);
 
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
 	builder.EnableTangents();
 
-	BuildMeshData(root_node, builder);
-	DC_ProcessCell(root_node, builder);
+	BuildMeshData(root, builder);
+	DC_ProcessCell(root, builder);
 
-	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", mesh_group_keys.Num()));
-	mesh_group_keys.Add(group_key);
+	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", 0));
 
 	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.LoadSynchronous());
 	octree_mesh->CreateSectionGroup(group_key, stream_set);
+
+	return root;
 }
 
 bool UOctreeManager::SimplifyOctree(OctreeNode* node)
@@ -1019,7 +986,7 @@ void UOctreeManager::DebugDrawOctree(OctreeNode* node, int32 current_depth)
 	}
 }
 
-void UOctreeManager::DebugDrawDCData()
+void UOctreeManager::DebugDrawDCData(OctreeNode* node)
 {
 #if UE_BUILD_DEBUG
 	for (size_t i = 0; i < debug_edges.Num(); i++)
@@ -1027,7 +994,7 @@ void UOctreeManager::DebugDrawDCData()
 		DrawDebugLine(GetWorld(), debug_edges[i].start, debug_edges[i].end, FColor::White);
 	}
 #endif
-	DebugDrawNodeMinimizer(root_node);
+	DebugDrawNodeMinimizer(node);
 }
 
 void UOctreeManager::DebugDrawNode(OctreeNode* node, float size, FColor color)
@@ -1083,39 +1050,6 @@ FVector3f UOctreeManager::FDMGetNormal(FVector3f at_point)
 }
 
 
-
-FVector UOctreeManager::GetActiveCameraLocation()
-{
-	return cam_proxy_actor->GetActorLocation();
-
-//#if WITH_EDITOR
-//	if (GEditor->IsPlaySessionInProgress())
-//	{
-//		if (APlayerCameraManager* camera_manager = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0))
-//		{
-//			return camera_manager->GetCameraLocation();
-//		}
-//		else 
-//		{
-//			//possible fallback
-//			//UGameplayStatics::GetPlayerCharacter(GetWorld(), 0)->
-//			return FVector();
-//		}
-//		
-//	}
-//	else if(GCurrentLevelEditingViewportClient)
-//	{
-//		return GCurrentLevelEditingViewportClient->GetViewLocation();
-//	}
-//	else 
-//	{
-//		return FVector();
-//	}
-//#else 
-//	return APlayerCameraManager * camera_manager = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0)->GetCameraLocation();
-//#endif
-}
-
 uint8 UOctreeManager::GetChildNodeFromPosition(FVector3f p, FVector3f node_center)
 {
 	bool x = p.X > node_center.X;
@@ -1139,411 +1073,6 @@ OctreeNode* UOctreeManager::GetNodeFromPositionDepth(OctreeNode* start, FVector3
 	return current;
 }
 
-void UOctreeManager::Tick(float DeltaTime)
-{
-#if !UE_BUILD_SHIPPING
-	if(octree_settings->draw_octree) DebugDrawOctree(root_node, 0);
-	if(octree_settings->draw_dc_data) DebugDrawDCData();
-#endif
-
-
-	// the dynamic octree construction loop
-
-	camera_pos = GetActiveCameraLocation();
-
-	uint8 extending_node_idx = GetChildNodeFromPosition(FVector3f(camera_pos), root_node->center);
-
-	UE_LOG(LogTemp,Display, TEXT("%i"), extending_node_idx);
-
-	if(octree_settings->stop_dynamic_octree) return;
-	//detect camera node change
-	if(last_visited_child_idx != extending_node_idx)
-	{
-		uint8 new_extending_node_idx;
-		uint8 flip;
-		do
-		{
-			float quarter_extending_node_size = root_node->size * 0.5f;
-			FVector3f new_center = root_node->center + child_offsets[extending_node_idx] * quarter_extending_node_size;
-
-			uint8 existing_node_idx = GetChildNodeFromPosition(root_node->center, new_center);
-			uint8 child_compute_mask = ~(1 << existing_node_idx);
-
-			OctreeNode* extending_node = new OctreeNode();
-			extending_node->center = new_center;
-			extending_node->depth = root_node->depth - 1;
-			extending_node->size = root_node->size * 2.f;
-
-			// assing the old root node to the new extending root child at existing_node_idx
-			extending_node->children[existing_node_idx] = root_node;
-
-			for (uint8 i = 0; i < 8; i++)
-			{
-				// selectively make the remaining 7 nodes
-				if ((child_compute_mask >> i) & 1)
-				{
-					OctreeNode* extending_child = new OctreeNode();
-					extending_child->center = new_center + child_offsets[i] * quarter_extending_node_size;
-					extending_child->size = root_node->size;
-					extending_child->depth = root_node->depth;
-
-					ConstructChildNodes(extending_child, extending_child->size);
-
-					extending_node->children[i] = extending_child;
-				}
-			}
-
-			PolygonizeExtendingNode(extending_node, existing_node_idx, 0);
-
-			root_node = extending_node;
-
-			//ConstructSeamOctree(extending_node->children[existing_node_idx], existing_node_idx, extending_node, );
-
-
-			//RealtimeMesh::FRealtimeMeshStreamSet stitch_stream_set;
-			//
-			//
-
-			//MeshBuilder stitch_builder(stitch_stream_set);
-			//stitch_builder.EnableTangents();
-
-			////the least we can do is reserve the amount up front
-			///*stitch_builder.ReserveNumTriangles(total_children_tris);
-			//stitch_builder.ReserveNumVertices(total_children_verts);*/
-
-			////BuildMeshData(extending_node, stitch_builder);
-
-
-			////handles every interior face of the extending node
-			//for (size_t i = 0; i < 12; i++)
-			//{
-			//	OctreeNode* child_1 = extending_node->children[process_cell_face_nodes[i][0]];
-			//	OctreeNode* child_2 = extending_node->children[process_cell_face_nodes[i][1]];
-			//	DC_ProcessFace(child_1, child_2, process_cell_face_nodes[i][2], stitch_builder);
-			//}
-
-			////interior 6 edges of the extending node
-			//for (size_t i = 0; i < 6; i++)
-			//{
-			//	OctreeNode* child_1 = extending_node->children[process_edge_nodes[i][0]];
-			//	OctreeNode* child_2 = extending_node->children[process_edge_nodes[i][1]];
-			//	OctreeNode* child_3 = extending_node->children[process_edge_nodes[i][2]];
-			//	OctreeNode* child_4 = extending_node->children[process_edge_nodes[i][3]];
-			//	DC_ProcessEdge(child_1, child_2, child_3, child_4, process_edge_nodes[i][4], stitch_builder);
-			//}
-
-			//const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh_Stitch", mesh_group_keys.Num()));
-			//mesh_group_keys.Add(group_key);
-			//octree_mesh->CreateSectionGroup(group_key, stitch_stream_set);
-
-
-			//the node the camera is supposed to be in, when extended
-			new_extending_node_idx = GetChildNodeFromPosition(FVector3f(camera_pos), extending_node->center);
-
-			flip = ~new_extending_node_idx & 0b00000111;
-		}
-		while(extending_node_idx != flip);
-
-		//make sure the extending_node_idx is flipped this time, when we set last_visited to extending_node_idx
-		extending_node_idx = ~extending_node_idx & 0b00000111;
-	}
-
-	last_visited_child_idx = extending_node_idx;
-}
-
-#include "SeamRecursionFunctions.inl"
-
-//gets two mirrored nodes along center that are not the input node idx
-constexpr unsigned char seam_node_pair[8][2] =
-{
-	{2, 5}, {3, 4}, {0, 7}, {1, 6}, {6, 1}, {7, 0}, {4, 3}, {5, 2}
-};
-
-using recfunc_sig = StitchOctreeNode* (*)(OctreeNode*, StitchOctreeNode*, MeshBuilder&);
-
-constexpr recfunc_sig own_seam_operations[8][3] = 
-{
-	{&FrontRecurse, &RightRecurse, &TopRecurse},
-	{&BackRecurse, &RightRecurse, &TopRecurse},
-	{&FrontRecurse, &RightRecurse, &BottomRecurse},
-	{&BackRecurse, &RightRecurse, &BottomRecurse},
-	{&FrontRecurse, &LeftRecurse, &TopRecurse},
-	{&BackRecurse, &LeftRecurse, &TopRecurse},
-	{&FrontRecurse, &LeftRecurse, &BottomRecurse},
-	{&BackRecurse, &LeftRecurse, &BottomRecurse}
-};
-
-constexpr recfunc_sig other_seam_operations[8][8] = 
-{
-	{nullptr, &BackRecurse, &BottomRecurse, &CornerBarRecurseBB, &RightRecurse, &CornerBarRecurseVLB, &CornerBarRecurseBL, &CornerMiniRecurse_0},
-	{&FrontRecurse, nullptr, &CornerBarRecurseBF, &BottomRecurse, &CornerBarRecurseVLF, &LeftRecurse, &CornerMiniRecurse_1, &CornerBarRecurseBL},
-	{&TopRecurse, &CornerBarRecurseTB, nullptr, &BackRecurse,	&CornerBarRecurseTL, &CornerMiniRecurse_2, &LeftRecurse, &CornerBarRecurseVLB},
-	{&CornerBarRecurseTF, &TopRecurse, &FrontRecurse, nullptr, &CornerMiniRecurse_3, &CornerBarRecurseTL, &CornerBarRecurseVLB, &LeftRecurse},
-	{&RightRecurse, &CornerBarRecurseVRB, &CornerBarRecurseBR, &CornerMiniRecurse_4, nullptr, &BackRecurse, &BottomRecurse, &CornerBarRecurseBB},
-	{&CornerBarRecurseVRF, &RightRecurse, &CornerMiniRecurse_5, &CornerBarRecurseBR, &FrontRecurse, nullptr, &CornerBarRecurseBF, &BottomRecurse},
-	{&CornerBarRecurseTR, &CornerMiniRecurse_6, &RightRecurse, &CornerBarRecurseVRB, &TopRecurse, &CornerBarRecurseTB, nullptr, &BackRecurse},
-	{&CornerMiniRecurse_7, &CornerBarRecurseTR, &CornerBarRecurseVRB, &RightRecurse, &CornerBarRecurseTF, &TopRecurse, &FrontRecurse, nullptr}
-};
-
-void UOctreeManager::PolygonizeExtendingNode(OctreeNode* extending_node, uint8 existing_node_idx, int8 mesh_depth)
-{
-	//if(!extending_node) return;
-
-
-	//code below can only be run if the extending node is only 1 level bigger,
-	//or if we found a valid bigger quadrant and subdivided until mesh_depth - 1
-	if(extending_node->depth == mesh_depth - 1)
-	{
-		// twice for each node in a seam_node_pair, we need to gather the operations needed on the 8 nodes to stitch the seams,
-		// based on existing_node_idx.
-
-		// requisites:
-
-		// we need a table for each node idx that describes the 3 operations for this node
-		// we need a table for each node idx that describes the operation for every other node
-		
-		const unsigned char* pair = seam_node_pair[existing_node_idx];
-
-		RealtimeMesh::FRealtimeMeshStreamSet stream_sets[8];
-		MeshBuilder builders[8] = {MeshBuilder(stream_sets[0]), MeshBuilder(stream_sets[1]), MeshBuilder(stream_sets[2]), MeshBuilder(stream_sets[3]),
-								   MeshBuilder(stream_sets[4]), MeshBuilder(stream_sets[5]), MeshBuilder(stream_sets[6]), MeshBuilder(stream_sets[7])};
-		
-		//isolate polygonize, no seam generation yet
-		for (uint8 i = 0; i < 8; i++)
-		{
-			if (i == existing_node_idx) continue;
-
-			builders[i].EnableTangents();
-
-			IsolatedPolygonizeNode(extending_node->children[i], builders[i]);
-		}
-
-		//for each of the mirrored node in the pair, construct seams that handle an X, Y and Z face inwards towards the new extending node center.
-		StitchOctreeNode* stitch_root[2];
-		for (uint8 i = 0; i < 2; i++)
-		{
-			stitch_root[i] = new StitchOctreeNode();
-			stitch_root[i]->type = NODE_INTERNAL;
-			stitch_root[i]->depth = mesh_depth - 1; //only in this case
-			stitch_root[i]->corners = 0;
-
-			StitchOctreeNode* stitch_main = own_seam_operations[pair[i]][0](extending_node->children[pair[i]], nullptr, builders[pair[i]]);
-											own_seam_operations[pair[i]][1](extending_node->children[pair[i]], stitch_main, builders[pair[i]]);
-											own_seam_operations[pair[i]][2](extending_node->children[pair[i]], stitch_main, builders[pair[i]]);
-
-			stitch_root[i]->children[pair[i]] = stitch_main;
-
-			for (uint8 j = 0; j < 8; j++)
-			{
-				if (j == pair[i]) continue;
-
-				stitch_root[i]->children[j] = other_seam_operations[pair[i]][j](extending_node->children[j], nullptr, builders[pair[i]]);
-			}
-
-			DC_ProcessCell(stitch_root[i], builders[pair[i]]);
-			delete stitch_root[i];
-		}
-
-		for (uint8 i = 0; i < 8; i++)
-		{
-			const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", mesh_group_keys.Num()));
-			mesh_group_keys.Add(group_key);
-			octree_mesh->CreateSectionGroup(group_key, stream_sets[i]);
-		}
-	}
-
-	//if(node->depth == mesh_depth)
-	//{
-	//	//polygonize octant mesh
-	//	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
-	//	MeshBuilder builder(stream_set);
-	//	builder.EnableTangents();
-
-	//	////call method to walk down octant and construct seam octree 
-	//	StitchOctreeNode* stitched = ConstructSeamOctree(node, node_idx, parent, builder);
-
-	//	DC_ProcessCell(stitched, builder);
-
-	//	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", mesh_group_keys.Num()));
-	//	mesh_group_keys.Add(group_key);
-	//	octree_mesh->CreateSectionGroup(group_key, stream_set);
-	//}
-	//else
-	//{
-	//	//subdivide
-	//	for (uint8 i = 0; i < 8; i++)
-	//	{
-	//		PolygonizeExtendingNode(node->children[i], i, node, mesh_depth);
-	//	}
-	//}
-	
-}
-
-void UOctreeManager::IsolatedPolygonizeNode(OctreeNode* node, MeshBuilder& builder)
-{
-	BuildMeshData(node, builder);
-
-	DC_ProcessCell(node, builder);
-}
-
-//StitchOctreeNode* UOctreeManager::ConstructSeamOctree(OctreeNode* from_node, uint8 node_idx, OctreeNode* parent, MeshBuilder& builder)
-//{
-//	// we need to walk down this with the normal octree nodes, 
-//	// then construct the stitch nodes along the way and assign index to the stitch node and vertex to the builder
-//	
-//	//this node recursion (no special case needed)
-//	StitchOctreeNode* stitch_main = left_x_recurse(left_x_recurse, from_node, nullptr, builder);
-//	back_z_recurse(back_z_recurse, from_node, stitch_main, builder);
-//	top_y_recurse(top_y_recurse, from_node, stitch_main, builder);
-//
-//	FVector3f left_query_p = from_node->center - FVector3f(0.f, from_node->size, 0.f);
-//	FVector3f back_query_p = from_node->center - FVector3f(from_node->size, 0.f, 0.f);
-//	FVector3f top_query_p = from_node->center + FVector3f(0.f, 0.f, from_node->size);
-//	FVector3f corner_y_query_p = from_node->center - FVector3f(from_node->size, from_node->size, 0.f);
-//	FVector3f corner_z_query_p = from_node->center + FVector3f(0.f, -from_node->size, from_node->size);
-//	FVector3f corner_x_query_p = from_node->center + FVector3f(-from_node->size, 0.f, from_node->size);
-//	FVector3f corner_mini_query_p = from_node->center - FVector3f(from_node->size, from_node->size, from_node->size);
-//
-//	StitchOctreeNode* stitch_root = new StitchOctreeNode();
-//	stitch_root->type = NODE_INTERNAL;
-//	stitch_root->depth = from_node->depth-1;
-//	stitch_root->corners = 0;
-//
-//	OctreeNode* left_neighbor = nullptr;
-//	OctreeNode* back_neighbor = nullptr;
-//	OctreeNode* top_neighbor = nullptr;
-//	OctreeNode* corner_y_neighbor = nullptr;
-//	OctreeNode* corner_z_neighbor = nullptr;
-//	OctreeNode* corner_x_neighbor = nullptr;
-//	OctreeNode* corner_mini_neighbor = nullptr;
-//
-//	//now, we need to get neighbor side nodes that lay next to from_node...
-//	switch(node_idx)
-//	{
-//	case 0:
-//
-//		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
-//		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
-//		top_neighbor = parent->children[2];
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = GetNodeFromPositionDepth(root_node, corner_z_query_p, from_node->depth);
-//		corner_x_neighbor = GetNodeFromPositionDepth(root_node, corner_x_query_p, from_node->depth);
-//		corner_mini_neighbor = GetNodeFromPositionDepth(root_node,corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	case 1:
-//
-//		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
-//		back_neighbor = parent->children[0];
-//		top_neighbor = parent->children[3];
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = GetNodeFromPositionDepth(root_node, corner_z_query_p, from_node->depth);
-//		corner_x_neighbor = parent->children[2];
-//		corner_mini_neighbor = GetNodeFromPositionDepth(root_node, corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	case 2:
-//
-//		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
-//		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
-//		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = GetNodeFromPositionDepth(root_node, corner_z_query_p, from_node->depth);
-//		corner_x_neighbor = GetNodeFromPositionDepth(root_node, corner_x_query_p, from_node->depth);
-//		corner_mini_neighbor= GetNodeFromPositionDepth(root_node, corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	case 3:
-//
-//		left_neighbor = GetNodeFromPositionDepth(root_node, left_query_p, from_node->depth);
-//		back_neighbor = parent->children[2];
-//		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = GetNodeFromPositionDepth(root_node, corner_z_query_p, from_node->depth);
-//		corner_x_neighbor = GetNodeFromPositionDepth(root_node, corner_x_query_p, from_node->depth);
-//		corner_mini_neighbor = GetNodeFromPositionDepth(root_node, corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	case 4:
-//
-//		left_neighbor = parent->children[0];
-//		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
-//		top_neighbor = parent->children[6];
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = parent->children[2];
-//		corner_x_neighbor = GetNodeFromPositionDepth(root_node, corner_x_query_p, from_node->depth);
-//		corner_mini_neighbor = GetNodeFromPositionDepth(root_node, corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	case 5:
-//
-//		left_neighbor = parent->children[1];
-//		back_neighbor = parent->children[4];
-//		top_neighbor = parent->children[7];
-//		corner_y_neighbor = parent->children[0];
-//		corner_z_neighbor = parent->children[3];
-//		corner_x_neighbor = parent->children[6];
-//		corner_mini_neighbor = parent->children[2];
-//
-//		break;
-//	case 6:
-//
-//		left_neighbor = parent->children[2];
-//		back_neighbor = GetNodeFromPositionDepth(root_node, back_query_p, from_node->depth);
-//		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = GetNodeFromPositionDepth(root_node, corner_z_query_p, from_node->depth);
-//		corner_x_neighbor = GetNodeFromPositionDepth(root_node, corner_x_query_p, from_node->depth);
-//		corner_mini_neighbor = GetNodeFromPositionDepth(root_node, corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	case 7:
-//
-//		left_neighbor = parent->children[3];
-//		back_neighbor = parent->children[6];
-//		top_neighbor = GetNodeFromPositionDepth(root_node, top_query_p, from_node->depth);
-//		corner_y_neighbor = GetNodeFromPositionDepth(root_node, corner_y_query_p, from_node->depth);
-//		corner_z_neighbor = GetNodeFromPositionDepth(root_node, corner_z_query_p, from_node->depth);
-//		corner_x_neighbor = GetNodeFromPositionDepth(root_node, corner_x_query_p, from_node->depth);
-//		corner_mini_neighbor = GetNodeFromPositionDepth(root_node, corner_mini_query_p, from_node->depth);
-//
-//		break;
-//	}
-//
-//	//border cases
-//	if(left_neighbor == from_node) left_neighbor = nullptr;
-//	if(back_neighbor == from_node) back_neighbor = nullptr;
-//	if(top_neighbor == from_node) top_neighbor = nullptr;
-//	if(corner_y_neighbor == from_node) corner_y_neighbor = nullptr;
-//	if(corner_x_neighbor == from_node) corner_x_neighbor = nullptr;
-//	if(corner_z_neighbor == from_node) corner_z_neighbor = nullptr;
-//	if(corner_mini_neighbor == from_node) corner_mini_neighbor = nullptr;
-//
-//	StitchOctreeNode* stitch_left = right_x_recurse(right_x_recurse, left_neighbor, nullptr, builder);
-//	StitchOctreeNode* stitch_back = front_z_recurse(front_z_recurse, back_neighbor, nullptr, builder);
-//	StitchOctreeNode* stitch_top = bottom_y_recurse(bottom_y_recurse, top_neighbor, nullptr, builder);
-//	StitchOctreeNode* stitch_y_corner = corner_y_recurse(corner_y_recurse, corner_y_neighbor, nullptr, builder);
-//	StitchOctreeNode* stitch_z_corner = corner_z_recurse(corner_z_recurse, corner_z_neighbor, nullptr, builder);
-//	StitchOctreeNode* stitch_x_corner = corner_x_recurse(corner_x_recurse, corner_x_neighbor, nullptr, builder);
-//	StitchOctreeNode* stitch_mini_corner = corner_mini_recurse(corner_mini_recurse, corner_mini_neighbor, nullptr, builder);
-//
-//	stitch_root->children[5] = stitch_main;
-//	stitch_root->children[1] = stitch_left;
-//	stitch_root->children[0] = stitch_y_corner;
-//	stitch_root->children[4] = stitch_back;
-//	stitch_root->children[7] = stitch_top;
-//	stitch_root->children[6] = stitch_x_corner;
-//	stitch_root->children[3] = stitch_z_corner;
-//	stitch_root->children[2] = stitch_mini_corner;
-//
-//	return stitch_root;
-//}
-
-TStatId UOctreeManager::GetStatId() const
-{
-	return TStatId();
-}
-
 bool UOctreeManager::DoesSupportWorldType(EWorldType::Type type) const
 {
 	return type == EWorldType::Game || type == EWorldType::Editor || type == EWorldType::PIE;
@@ -1557,14 +1086,4 @@ bool UOctreeManager::ShouldCreateSubsystem(UObject* Outer) const
 		return WT == EWorldType::Game || WT == EWorldType::PIE  || WT == EWorldType::Editor;
 	}
 	return false;
-}
-
-bool UOctreeManager::IsTickable() const
-{
-	return true;
-}
-
-bool UOctreeManager::IsTickableInEditor() const
-{
-	return true;
 }

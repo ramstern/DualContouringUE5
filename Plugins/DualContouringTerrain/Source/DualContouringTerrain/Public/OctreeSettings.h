@@ -20,16 +20,8 @@ class DUALCONTOURINGTERRAIN_API UOctreeSettings : public UDeveloperSettings
 public:
 	UOctreeSettings();
 
-	
-
 	UPROPERTY(Config, EditAnywhere, meta = (ClampMin = 2, ClampMax = 10))
 	uint32 max_depth = 2;
-
-	UPROPERTY(Config, EditAnywhere, meta = (ClampMax = -1, ClampMin = -5))
-	int32 shrink_depth = -4;
-
-	UPROPERTY(Config, EditAnywhere, meta=(Multiple=2))
-	float initial_size = 3200.f;
 
 	UPROPERTY(Config, EditAnywhere, meta = (UIMin = -1, UIMax = 1))
 	float iso_surface = 0.5f;
@@ -66,9 +58,6 @@ public:
 	
 	UPROPERTY(Config, EditAnywhere, meta = (EditCondition = "draw_octree", EditConditionHides, NoRebuild="true"), Category = "Debug Drawing")
 	int32 debug_draw_how_deep = 1;
-
-	UPROPERTY(Config, EditAnywhere, meta=(NoRebuild="true"))
-	bool stop_dynamic_octree = false;
 
 	DECLARE_MULTICAST_DELEGATE(FOnOctreeSettingsChanged);
 	static FOnOctreeSettingsChanged& OnChanged()

@@ -25,7 +25,7 @@ namespace RealtimeMesh
 using MeshBuilder = RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1, uint16>;
 
 UCLASS()
-class DUALCONTOURINGTERRAIN_API UOctreeManager : public UTickableWorldSubsystem
+class DUALCONTOURINGTERRAIN_API UOctreeManager : public UWorldSubsystem
 {
 	GENERATED_BODY()
 	
@@ -38,9 +38,6 @@ public:
 
 private:
 
-	// returns root node
-	OctreeNode* SetupOctree();
-
 	// recursive construction of child nodes
 	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size);
 	OctreeNode* ConstructChildNodes(OctreeNode*& node);
@@ -52,10 +49,10 @@ private:
 	TArray<float> SampleOctreeNodeDensities(OctreeNode* node);
 
 	// get node size from depth, could be tableized
-	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return octree_settings->initial_size / std::exp2f(static_cast<float>(depth)); };
+	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return 0.f / std::exp2f(static_cast<float>(depth)); };
 
-	// rebuilds the entire octree
-	void RebuildOctree();
+	// builds an octree and returns it
+	OctreeNode* BuildOctree(FVector3f center);
 
 	// simplify the octree with residual error
 	bool SimplifyOctree(OctreeNode* node);
@@ -75,47 +72,26 @@ private:
 	void DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* node_2, unsigned char direction, MeshBuilder& builder);
 	void DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* node_2, StitchOctreeNode* node_3, StitchOctreeNode* node_4, unsigned char direction, MeshBuilder& builder);
 
-	void PolygonizeExtendingNode(OctreeNode* extending_node, uint8 existing_node_idx, int8 meshing_depth);
-	void IsolatedPolygonizeNode(OctreeNode* node, MeshBuilder& builder);
-
 	//returns the root stitch node copy of start_node
 	//StitchOctreeNode* ConstructSeamOctree(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent_node, MeshBuilder& builder);
 
 	//debug draw octree nodes
 	void DebugDrawOctree(OctreeNode* node, int32 current_depth);
 	//debug draw dc data
-	void DebugDrawDCData();
+	void DebugDrawDCData(OctreeNode* node);
 	void DebugDrawNode(OctreeNode* node, float size, FColor color);
 	void DebugDrawNodeMinimizer(OctreeNode* node);
 
 	// get normal via fdm 
 	FVector3f FDMGetNormal(FVector3f at_point);
 
-	// try to get current render camera
-	FVector GetActiveCameraLocation();
-
 	// get child index containing p from node position
 	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
 
 	OctreeNode* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth);
 
-	// seam recursion functions
-	/*StitchOctreeNode* LeftRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
-	StitchOctreeNode* RightRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
-	StitchOctreeNode* BackRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
-	StitchOctreeNode* FrontRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
-	StitchOctreeNode* TopRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
-	StitchOctreeNode* BottomRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshBuilder& builder);
-	StitchOctreeNode* CornerBarRecurse(OctreeNode* node, StitchOctreeNode* existing, unsigned char* bar_lookup, MeshBuilder& builder);
-	StitchOctreeNode* CornerMiniRecurse(OctreeNode* node, StitchOctreeNode* existing, unsigned char idx, MeshBuilder& builder);*/
-
-
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;
-	OctreeNode* root_node = nullptr;
-
-	FVector camera_pos = FVector();
-	uint8 last_visited_child_idx = 255ui8;
 
 #if UE_BUILD_DEBUG
 	struct dbg_edge
@@ -129,16 +105,7 @@ private:
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
 	URealtimeMeshSimple* octree_mesh = nullptr;
-	TArray<FRealtimeMeshSectionGroupKey> mesh_group_keys;
-
-	//debug cam proxy actor
-	ADC_OctreeRenderActor* cam_proxy_actor = nullptr;
-
-	virtual void Tick(float DeltaTime) override;
-	TStatId GetStatId() const override;
 
 	virtual bool DoesSupportWorldType(EWorldType::Type type) const override;
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-	virtual bool IsTickable() const override;
-	virtual bool IsTickableInEditor() const override;
 };

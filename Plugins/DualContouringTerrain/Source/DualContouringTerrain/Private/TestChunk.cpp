@@ -145,7 +145,7 @@ void ATestChunk::DualContour(TArray<float>& densities)
 
 	float half_voxel_size = voxel_size*0.5f;
 
-	float scale_factor = 0.01f;
+	float scale_fac = 0.01f;
 
 	const FVector3f voxel_corner_offsets[8] = 
 	{
@@ -253,12 +253,12 @@ void ATestChunk::DualContour(TArray<float>& densities)
 					mass_point += intersection;
 
 					//at 32 vox size, i dont think it's worth doing better zero crossing
-					float alpha_density = gen->GetNoiseSingle3D(intersection.X * scale_factor, intersection.Y * scale_factor, intersection.Z * scale_factor) - iso_surface;
+					float alpha_density = gen->GetNoiseSingle3D(intersection.X * scale_fac, intersection.Y * scale_fac, intersection.Z * scale_fac) - iso_surface;
 
-					FVector3f normal = FDMGetNormal(intersection * scale_factor);
+					FVector3f normal = FDMGetNormal(intersection * scale_fac);
 					vert_normal += normal;
 
-					vox_pq += quadric3::probabilistic_plane_quadric(intersection * scale_factor, normal, stddev_pos, stddev_normal);
+					vox_pq += quadric3::probabilistic_plane_quadric(intersection * scale_fac, normal, stddev_pos, stddev_normal);
 					edge_count++;
 				}
 
@@ -266,7 +266,7 @@ void ATestChunk::DualContour(TArray<float>& densities)
 				mass_point /= edge_count;
 				debug_verts_normal.Add(vert_normal);
 
-				FVector3f vertex_pos = vox_pq.minimizer() * 1.f/scale_factor;
+				FVector3f vertex_pos = vox_pq.minimizer() * 1.f/scale_fac;
 
 				/*if(vertex_pos.X > (vox_pos.X+half_voxel_size) || vertex_pos.X < (vox_pos.X-half_voxel_size) || vertex_pos.Y > (vox_pos.Y+half_voxel_size) || 
 					vertex_pos.Y < (vox_pos.Y-half_voxel_size) || vertex_pos.Z > (vox_pos.Z +half_voxel_size) || vertex_pos.Z < (vox_pos.Z-half_voxel_size))

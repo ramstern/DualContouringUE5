@@ -36,24 +36,23 @@ public:
 	
 	void PostWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
 
+	// builds an octree and returns it
+	OctreeNode* BuildOctree(FVector3f center, float size);
+
+	void PolygonizeOctree(OctreeNode* node);
+
 private:
 
 	// recursive construction of child nodes
-	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size);
-	OctreeNode* ConstructChildNodes(OctreeNode*& node);
+	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, FVector3f root_min, float root_size);
 
 	// creation and data collection of leaf nodes
-	OctreeNode* ConstructLeafNode(OctreeNode*& node);
-
-	// samples density values at a nodes 8 corners
-	TArray<float> SampleOctreeNodeDensities(OctreeNode* node);
+	OctreeNode* ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, FVector3f root_min, float root_size);
 
 	// get node size from depth, could be tableized
 	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return 0.f / std::exp2f(static_cast<float>(depth)); };
 
-	// builds an octree and returns it
-	OctreeNode* BuildOctree(FVector3f center);
-
+	
 	// simplify the octree with residual error
 	bool SimplifyOctree(OctreeNode* node);
 
@@ -75,6 +74,8 @@ private:
 	//returns the root stitch node copy of start_node
 	//StitchOctreeNode* ConstructSeamOctree(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent_node, MeshBuilder& builder);
 
+	FORCEINLINE int32 GetDim(int32 depth) { return 1 << depth;};
+
 	//debug draw octree nodes
 	void DebugDrawOctree(OctreeNode* node, int32 current_depth);
 	//debug draw dc data
@@ -89,6 +90,11 @@ private:
 	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
 
 	OctreeNode* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth);
+
+	FORCEINLINE int32 Get1DIndexFrom3D(int32 x, int32 y, int32 z, int32 dim) const
+	{
+		return z + (y * dim) + (x * dim * dim);
+	}
 
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;

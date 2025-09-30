@@ -86,19 +86,13 @@ FVector3f child_offsets[8] =
 constexpr float scale_factor = 0.01f;
 constexpr float inv_scale_factor = 1.f / scale_factor;
 
-OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node)
-{
-	float node_size = SizeFromNodeDepth(node->depth);
-	return ConstructChildNodes(node, node_size);
-}
-
-OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_size)
+OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, FVector3f root_min, float root_size)
 {
 	node->size = node_size;
 
 	if(node->depth == octree_settings->max_depth)
 	{
-		return ConstructLeafNode(node);
+		return ConstructLeafNode(node, noise_data, root_min, root_size);
 	}
 
 	bool has_children = false;
@@ -109,7 +103,7 @@ OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_si
 
 		child->depth = node->depth + 1;
 		child->center = node->center + child_offsets[i] * node->size * 0.25f;
-		node->children[i] = ConstructChildNodes(child);
+		node->children[i] = ConstructChildNodes(child, node_size*0.5f, noise_data, root_min, root_size);
 		node->child_mask |= static_cast<bool>(node->children[i]) << i;
 
 		has_children |= static_cast<bool>(node->children[i]);
@@ -138,11 +132,32 @@ constexpr unsigned char edges_corner_map[12][2] =
 	{0,1},{2,3},{4,5},{6,7}		// z-axis
 };
 
-OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node)
+OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, FVector3f root_min, float root_size)
 {
 	const unsigned int MAX_ZERO_CROSSINGS = 6;
 	
-	TArray<float> corner_densities = SampleOctreeNodeDensities(node);
+	int32 dim = GetDim(node->depth)+1;
+
+	FVector3f local_node_query_p = (node->center - root_min);
+	FIntVector3 lc = FIntVector3(local_node_query_p.X / root_size, local_node_query_p.Y / root_size, local_node_query_p.Z / root_size);
+
+	int32 idx_table[8];
+	idx_table[0] = Get1DIndexFrom3D(lc.X, lc.Y, lc.Z, dim);
+	idx_table[1] = Get1DIndexFrom3D(lc.X + 1, lc.Y, lc.Z, dim);
+	idx_table[2] = Get1DIndexFrom3D(lc.X, lc.Y, lc.Z + 1, dim);
+	idx_table[3] = Get1DIndexFrom3D(lc.X + 1, lc.Y, lc.Z + 1, dim);
+	idx_table[4] = Get1DIndexFrom3D(lc.X, lc.Y + 1, lc.Z, dim);
+	idx_table[5] = Get1DIndexFrom3D(lc.X + 1, lc.Y + 1, lc.Z, dim);
+	idx_table[6] = Get1DIndexFrom3D(lc.X, lc.Y + 1, lc.Z + 1, dim);
+	idx_table[7] = Get1DIndexFrom3D(lc.X + 1, lc.Y + 1, lc.Z + 1, dim);
+
+	//TArray<float> corner_densities = SampleOctreeNodeDensities(node);
+
+	float corner_densities[8] = { noise_data[idx_table[0]], noise_data[idx_table[1]], noise_data[idx_table[2]],
+								  noise_data[idx_table[3]], noise_data[idx_table[4]], noise_data[idx_table[5]],
+								  noise_data[idx_table[6]], noise_data[idx_table[7]]};
+
+	//TArray<float> corner_densities = SampleOctreeNodeDensities(noise_data, densityarr_indices);
 
 	for (uint8_t i = 0; i < 8; i++)
 	{
@@ -246,31 +261,7 @@ OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node)
 	return node;
 }
 
-TArray<float> UOctreeManager::SampleOctreeNodeDensities(OctreeNode* node)
-{
-	const float scaling_factor = 0.01f;
-
-	float half_node_size = node->size * scaling_factor * 0.5f;
-
-	FVector3f node_center = node->center * scaling_factor;
-
-	////todo repeated operations
-	//float x_positions[8] = {node_center.X + half_node_size, node_center.X + half_node_size, node_center.X - half_node_size, node_center.X - half_node_size, node_center.X + half_node_size, node_center.X + half_node_size, node_center.X - half_node_size, node_center.X - half_node_size};
-	//float y_positions[8] = {node_center.Y - half_node_size, node_center.Y + half_node_size, node_center.Y + half_node_size, node_center.Y - half_node_size, node_center.Y - half_node_size, node_center.Y + half_node_size, node_center.Y + half_node_size, node_center.Y - half_node_size};
-	//float z_positions[8] = {node_center.Z - half_node_size, node_center.Z - half_node_size, node_center.Z - half_node_size, node_center.Z + half_node_size, node_center.Z + half_node_size, node_center.Z + half_node_size, node_center.Z + half_node_size, node_center.Z + half_node_size};
-
-	float x_positions[8], y_positions[8], z_positions[8];
-	for (int i = 0; i < 8; ++i)
-	{
-		x_positions[i] = node_center.X + child_offsets[i].X * half_node_size;
-		y_positions[i] = node_center.Y + child_offsets[i].Y * half_node_size;
-		z_positions[i] = node_center.Z + child_offsets[i].Z * half_node_size;
-	}
-
-	return noise_gen->GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 8);
-}
-
-OctreeNode* UOctreeManager::BuildOctree(FVector3f center)
+OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 {
 #if UE_BUILD_DEBUG
 	debug_edges.Empty();
@@ -282,23 +273,51 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center)
 	root->center = center;
 	root->depth = 0;
 
-	ConstructChildNodes(root);
+	int32 dim = GetDim(octree_settings->max_depth)+1;
+
+	TArray<float> x_pos, y_pos, z_pos;
+	x_pos.SetNumUninitialized(dim * dim * dim);
+	y_pos.SetNumUninitialized(dim * dim * dim);
+	z_pos.SetNumUninitialized(dim * dim * dim);
+
+	FVector3f min = center - size*0.5f;
+	float vox_size = size / (dim-1);
+
+	for (size_t x = 0; x < dim; x++)
+	{
+		for (size_t y = 0; y < dim; y++)
+		{
+			for (size_t z = 0; z < dim; z++)
+			{
+				int32 idx = Get1DIndexFrom3D(x,y,z, dim);
+				x_pos[idx] = (min.X + vox_size * x) * 0.01f;
+				y_pos[idx] = (min.Y + vox_size * y) * 0.01f;
+				z_pos[idx] = (min.Z + vox_size * z) * 0.01f;
+			}
+		}
+	}
+
+	TArray<float> noise = noise_gen->GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim*dim*dim);
+
+	ConstructChildNodes(root, size, noise, min, size);
 
 	if(octree_settings->simplify) SimplifyOctree(root);
+	return root;
+}
 
+void UOctreeManager::PolygonizeOctree(OctreeNode* node)
+{
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
 	builder.EnableTangents();
 
-	BuildMeshData(root, builder);
-	DC_ProcessCell(root, builder);
+	BuildMeshData(node, builder);
+	DC_ProcessCell(node, builder);
 
 	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", 0));
 
 	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.LoadSynchronous());
 	octree_mesh->CreateSectionGroup(group_key, stream_set);
-
-	return root;
 }
 
 bool UOctreeManager::SimplifyOctree(OctreeNode* node)

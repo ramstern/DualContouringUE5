@@ -73,6 +73,7 @@ void UChunkProvider::InitializeChunks(FIntVector3 current_chunk_coord)
 		Chunk chunk;
 		chunk.center = FVector3f(world_coord.X * size + size * 0.5f, world_coord.Y * size + size * 0.5f, world_coord.Z * size + size * 0.5f);
 		chunk.coordinates = world_coord;
+		chunk.root = octree_manager->BuildOctree(chunk.center, size);
 
 		int32 idx = chunk_grid.GetStableChunkIndex(chunk.coordinates);
 
@@ -86,7 +87,6 @@ void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coor
 	TSet<FIntVector3> rebuilds;
 
 	uint8 count = !!delta.X + !!delta.Y + !!delta.Z;
-
 
 	rebuilds.Reserve(count * (chunk_grid.dim*chunk_grid.dim));
 
@@ -132,6 +132,7 @@ void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coor
 		Chunk chunk;
 		chunk.coordinates = coord;
 		chunk.center = FVector3f(chunk.coordinates.X * size + size * 0.5f, chunk.coordinates.Y * size + size * 0.5f, chunk.coordinates.Z * size + size * 0.5f);
+		chunk.root = octree_manager->BuildOctree(chunk.center, size);
 
 		chunk_grid.chunks[flat_idx] = MoveTemp(chunk);
 	}
@@ -195,10 +196,6 @@ void UChunkProvider::Tick(float DeltaTime)
 		FIntVector3 delta = current_chunk_coord - last_chunk_coord;
 
 		BuildSlab(delta, current_chunk_coord);
-		if(delta.X && delta.Y) 
-		{
-			UE_LOG(LogTemp, Display, TEXT("double delta"));
-		}
 	}
 
 	last_chunk_coord = current_chunk_coord;

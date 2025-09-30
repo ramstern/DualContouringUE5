@@ -55,7 +55,7 @@ private:
 
 	FORCEINLINE FIntVector3 GetChunkCoordinatesFromPosition(FVector3f position) 
 	{
-		return FIntVector3(position.X / chunk_settings->chunk_size, position.Y / chunk_settings->chunk_size, position.Z / chunk_settings->chunk_size);
+		return FIntVector3(FMath::FloorToInt(position.X / chunk_settings->chunk_size), FMath::FloorToInt(position.Y / chunk_settings->chunk_size), FMath::FloorToInt(position.Z / chunk_settings->chunk_size));
 	};
 
 	const UChunkProviderSettings* chunk_settings = nullptr;

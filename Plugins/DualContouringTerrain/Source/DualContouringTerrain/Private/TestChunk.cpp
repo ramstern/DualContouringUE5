@@ -143,9 +143,9 @@ void ATestChunk::DualContour(TArray<float>& densities)
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
 	builder.EnableTangents();
 
-	const float half_voxel_size = voxel_size*0.5f;
+	float half_voxel_size = voxel_size*0.5f;
 
-	const float scale_factor = 0.01f;
+	float scale_factor = 0.01f;
 
 	const FVector3f voxel_corner_offsets[8] = 
 	{
@@ -159,7 +159,7 @@ void ATestChunk::DualContour(TArray<float>& densities)
 		{-half_voxel_size, half_voxel_size, -half_voxel_size}
 	};
 
-	const uint32 edges_corner_map[12][2] = 
+	uint32 edges_corner_map[12][2] = 
 	{
 		{0, 1}, {1, 2}, {2, 3}, {3, 0},
 		{4, 0}, {1, 5}, {2, 6}, {7, 3},

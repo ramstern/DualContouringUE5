@@ -18,6 +18,12 @@ public:
 	UPROPERTY(Config, EditAnywhere)
 	int32 chunk_load_distance;
 
+	UPROPERTY(Config, EditAnywhere)
+	int32 chunk_size;
+
+	UPROPERTY(Config, EditAnywhere)
+	bool draw_debug_chunks;
+
 	DECLARE_MULTICAST_DELEGATE(FOnChunkProviderSettingsChanged);
 	static FOnChunkProviderSettingsChanged& OnChanged()
 	{

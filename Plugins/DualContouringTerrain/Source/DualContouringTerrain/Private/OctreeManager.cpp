@@ -86,7 +86,7 @@ FVector3f child_offsets[8] =
 constexpr float scale_factor = 0.01f;
 constexpr float inv_scale_factor = 1.f / scale_factor;
 
-OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, FVector3f root_min, float root_size)
+OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, float root_min, float root_size)
 {
 	node->size = node_size;
 
@@ -118,13 +118,6 @@ OctreeNode* UOctreeManager::ConstructChildNodes(OctreeNode*& node, float node_si
 	return node;
 }
 
-//constexpr unsigned char edges_corner_map[12][2] =
-//{
-//	{0, 1}, {1, 2}, {2, 3}, {3, 0},
-//	{4, 0}, {1, 5}, {2, 6}, {7, 3},
-//	{4, 5}, {5, 6}, {6, 7}, {7, 4}
-//};
-
 constexpr unsigned char edges_corner_map[12][2] =
 {
 	{0,4},{1,5},{2,6},{3,7},	// x-axis 
@@ -132,7 +125,126 @@ constexpr unsigned char edges_corner_map[12][2] =
 	{0,1},{2,3},{4,5},{6,7}		// z-axis
 };
 
-OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, FVector3f root_min, float root_size)
+void UOctreeManager::ConstructLeafNode_V2(OctreeNode* node, FVector3f node_p, float* corner_densities, uint8 corners)
+{
+	const unsigned int MAX_ZERO_CROSSINGS = 6;
+
+	if(node->depth == octree_settings->max_depth)
+	{
+		//node is a leaf
+		node->type = NODE_LEAF;
+
+		FVector3f mass_point{};
+		FVector3f vert_normal{};
+		uint8 edge_count = 0;
+		quadric3 vox_pq;
+
+		//UE_ASSUME(edge_count != 0);
+
+		for (size_t i = 0; i < 12 && edge_count < MAX_ZERO_CROSSINGS; i++)
+		{
+			unsigned char s1 = (node->corners >> edges_corner_map[i][0]) & 1;
+			unsigned char s2 = (node->corners >> edges_corner_map[i][1]) & 1;
+
+			if (s1 == s2) continue;
+
+			//detected sign change on current edge
+			FVector3f corner_1 = child_offsets[edges_corner_map[i][0]] * node->size * 0.5f + node->center;
+			FVector3f corner_2 = child_offsets[edges_corner_map[i][1]] * node->size * 0.5f + node->center;
+
+			float d1 = corner_densities[edges_corner_map[i][0]] - octree_settings->iso_surface;
+			float d2 = corner_densities[edges_corner_map[i][1]] - octree_settings->iso_surface;
+
+			// (1-alpha)*d1 + alpha*d2 = 0
+			// d1 - alpha*d1 + alpha*d2 = 0
+			// d1 + alpha(-d1+d2) = 0
+			// alpha = d1 / (d1-d2)
+			float alpha = d1 / (d1 - d2 + FLT_EPSILON);
+
+			FVector3f intersection = FMath::Lerp(corner_1, corner_2, alpha);
+			mass_point += intersection;
+
+			//at 32 vox size, i dont think it's worth doing better zero crossing. below usually gives values in order of 0.001 > x > -0.001
+			float alpha_density = noise_gen->GetNoiseSingle3D(intersection.X * scale_factor, intersection.Y * scale_factor, intersection.Z * scale_factor) - octree_settings->iso_surface;
+
+			FVector3f normal = FDMGetNormal(intersection * scale_factor);
+			vert_normal += normal;
+
+			vox_pq += quadric3::probabilistic_plane_quadric(intersection * scale_factor, normal, octree_settings->stddev_pos, octree_settings->stddev_normal);
+			edge_count++;
+		}
+
+		node->leaf_data = new DC_LeafData();
+		node->leaf_data->qef = vox_pq;
+		node->leaf_data->normal = vert_normal / edge_count;
+		node->leaf_data->minimizer = vox_pq.minimizer();
+
+#if CLAMP_MINIMIZERS
+
+		float half_size = node->size * 0.5f * scale_factor;
+		FVector3f scaled_center = node->center * scale_factor;
+
+		if (node->leaf_data->minimizer.X > scaled_center.X + half_size)
+		{
+			node->leaf_data->minimizer.X = scaled_center.X + half_size;
+		}
+		if (node->leaf_data->minimizer.Y > scaled_center.Y + half_size)
+		{
+			node->leaf_data->minimizer.Y = scaled_center.Y + half_size;
+		}
+		if (node->leaf_data->minimizer.Z > scaled_center.Z + half_size)
+		{
+			node->leaf_data->minimizer.Z = scaled_center.Z + half_size;
+		}
+
+
+		if (node->leaf_data->minimizer.X < scaled_center.X - half_size)
+		{
+			node->leaf_data->minimizer.X = scaled_center.X - half_size;
+		}
+		if (node->leaf_data->minimizer.Y < scaled_center.Y - half_size)
+		{
+			node->leaf_data->minimizer.Y = scaled_center.Y - half_size;
+		}
+		if (node->leaf_data->minimizer.Z < scaled_center.Z - half_size)
+		{
+			node->leaf_data->minimizer.Z = scaled_center.Z - half_size;
+		}
+#endif
+
+#if UE_BUILD_DEBUG
+		if (isnan(node->leaf_data->minimizer.X) || isnan(node->leaf_data->minimizer.Y) || isnan(node->leaf_data->minimizer.Z))
+		{
+			//check(false);
+		}
+#endif
+		return;
+	}
+
+	uint8 this_idx = GetChildNodeFromPosition(node_p, node->center);
+
+	if(!node->children[this_idx])
+	{
+		OctreeNode* new_node = new OctreeNode();
+		new_node->depth = node->depth + 1;
+		new_node->center = node->center + child_offsets[this_idx] * node->size * 0.25f;
+
+		node->children[this_idx] = new_node;
+	}
+
+	ConstructLeafNode_V2(node->children[this_idx], node_p, corner_densities, corners);
+}
+
+//constexpr unsigned char edges_corner_map[12][2] =
+//{
+//	{0, 1}, {1, 2}, {2, 3}, {3, 0},
+//	{4, 0}, {1, 5}, {2, 6}, {7, 3},
+//	{4, 5}, {5, 6}, {6, 7}, {7, 4}
+//};
+
+
+
+OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, float root_min, float root_size)
 {
 	const unsigned int MAX_ZERO_CROSSINGS = 6;
 	
@@ -155,7 +267,7 @@ OctreeNode* UOctreeManager::ConstructLeafNode(OctreeNode*& node, TArray<float>& 
 
 	float corner_densities[8] = { noise_data[idx_table[0]], noise_data[idx_table[1]], noise_data[idx_table[2]],
 								  noise_data[idx_table[3]], noise_data[idx_table[4]], noise_data[idx_table[5]],
-								  noise_data[idx_table[6]], noise_data[idx_table[7]]};
+								  noise_data[idx_table[6]], noise_data[idx_table[7]] };
 
 	//TArray<float> corner_densities = SampleOctreeNodeDensities(noise_data, densityarr_indices);
 
@@ -299,7 +411,53 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 
 	TArray<float> noise = noise_gen->GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim*dim*dim);
 
-	ConstructChildNodes(root, size, noise, min, size);
+	TArray<uint8> corners; 
+	int32 vox_dim = dim-1;
+	corners.SetNum(vox_dim*vox_dim*vox_dim);
+
+	for (size_t x = 0; x < vox_dim; x++)
+	{
+		for (size_t y = 0; y < vox_dim; y++)
+		{
+			for (size_t z = 0; z < vox_dim; z++)
+			{
+				//FVector3f local_node_query_p = FVector3f(x * vox_size + vox_size * 0.5f, y * vox_size + vox_size * 0.5f, z * vox_size + vox_size * 0.5f);
+				FIntVector3 lc = FIntVector3(x, y, z);
+
+				int32 idx_table[8];
+				idx_table[0] = Get1DIndexFrom3D(lc.X, lc.Y, lc.Z, dim);
+				idx_table[1] = Get1DIndexFrom3D(lc.X + 1, lc.Y, lc.Z, dim);
+				idx_table[2] = Get1DIndexFrom3D(lc.X, lc.Y, lc.Z + 1, dim);
+				idx_table[3] = Get1DIndexFrom3D(lc.X + 1, lc.Y, lc.Z + 1, dim);
+				idx_table[4] = Get1DIndexFrom3D(lc.X, lc.Y + 1, lc.Z, dim);
+				idx_table[5] = Get1DIndexFrom3D(lc.X + 1, lc.Y + 1, lc.Z, dim);
+				idx_table[6] = Get1DIndexFrom3D(lc.X, lc.Y + 1, lc.Z + 1, dim);
+				idx_table[7] = Get1DIndexFrom3D(lc.X + 1, lc.Y + 1, lc.Z + 1, dim);
+
+				//TArray<float> corner_densities = SampleOctreeNodeDensities(node);
+
+				float corner_densities[8] = { noise[idx_table[0]], noise[idx_table[1]], noise[idx_table[2]],
+											  noise[idx_table[3]], noise[idx_table[4]], noise[idx_table[5]],
+											  noise[idx_table[6]], noise[idx_table[7]] };
+
+
+				int32 vox_idx = Get1DIndexFrom3D(x,y,z, vox_dim);
+				for (uint8_t i = 0; i < 8; i++)
+				{
+					corners[vox_idx] |= ((corner_densities[i] - octree_settings->iso_surface) <= 0.f) << i;
+				}
+
+				FVector3f local_pos = FVector3f(x*vox_size + vox_size * 0.5f, y*vox_size + vox_size*0.5f, z*vox_size + vox_size * 0.5f);
+
+				if(corners[vox_idx] != 255 && corners[vox_idx] != 0) 
+				{
+					ConstructLeafNode_V2(root, local_pos, corner_densities, corners[vox_idx]);
+				}
+			}
+		}
+	}
+
+	//ConstructChildNodes(root, size, noise, root_min, );
 
 	if(octree_settings->simplify) SimplifyOctree(root);
 	return root;

@@ -44,10 +44,12 @@ public:
 private:
 
 	// recursive construction of child nodes
-	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, FVector3f root_min, float root_size);
+	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, float root_min, float root_size);
 
 	// creation and data collection of leaf nodes
-	OctreeNode* ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, FVector3f root_min, float root_size);
+	OctreeNode* ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, float root_min, float root_size);
+
+	void ConstructLeafNode_V2(OctreeNode* node, FVector3f node_p, float* corner_densities, uint8 corners);
 
 	// get node size from depth, could be tableized
 	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return 0.f / std::exp2f(static_cast<float>(depth)); };

@@ -270,7 +270,7 @@ constexpr recfunc_sig other_seam_operations[2][7] =
 	{BackRecurse, BottomRecurse, CornerBarRecurseBB, LeftRecurse, CornerBarRecurseVLB, CornerBarRecurseBL, CornerMiniRecurse_0}
 };
 
-StitchOctreeNode* UOctreeManager::ConstructSeamOctree(OctreeNode* seam_nodes[8], bool nd, MeshBuilder& builder)
+StitchOctreeNode* UOctreeManager::ConstructSeamOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& seam_nodes, bool nd, MeshBuilder& builder)
 {
 	//this node recursion (no special case needed)
 	StitchOctreeNode* stitch_main = main_seam_operations[nd][0](seam_nodes[main_node[nd]], nullptr, builder);
@@ -411,7 +411,7 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 	return root;
 }
 
-FRealtimeMeshSectionGroupKey UOctreeManager::PolygonizeOctree(OctreeNode* nodes[8], bool negative_delta)
+FRealtimeMeshSectionGroupKey UOctreeManager::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta)
 {
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);

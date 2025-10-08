@@ -40,7 +40,7 @@ public:
 	OctreeNode* BuildOctree(FVector3f center, float size);
 
 	//input: specific ordering of the main node and all its neighbor nodes
-	FRealtimeMeshSectionGroupKey PolygonizeOctree(OctreeNode* node[8], bool negative_delta);
+	FRealtimeMeshSectionGroupKey PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta);
 
 	void CleanupChunkMesh(FRealtimeMeshSectionGroupKey key);
 
@@ -50,7 +50,7 @@ private:
 
 	void ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners);
 
-	StitchOctreeNode* ConstructSeamOctree(OctreeNode* seam_nodes[8], bool negative_delta, MeshBuilder& builder);
+	StitchOctreeNode* ConstructSeamOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& seam_nodes, bool negative_delta, MeshBuilder& builder);
 
 	// get node size from depth, could be tableized
 	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return 0.f / std::exp2f(static_cast<float>(depth)); };

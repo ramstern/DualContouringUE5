@@ -26,7 +26,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, meta = (UIMin = -1, UIMax = 1))
 	float iso_surface = 0.5f;
 
-	UPROPERTY(EditAnywhere, Config, Category = "Rendering", meta = (AllowedClasses = "MaterialInterface"))
+	UPROPERTY(EditAnywhere, Config, Category = "Rendering", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
 	TSoftObjectPtr<UMaterialInterface> mesh_material;
 
 	UPROPERTY(Config, EditAnywhere)

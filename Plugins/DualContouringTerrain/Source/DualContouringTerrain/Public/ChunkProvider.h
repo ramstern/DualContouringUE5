@@ -46,7 +46,7 @@ private:
 		TArray<TOptional<Chunk>> chunks;
 		TQueue<TFunction<ChunkCreationResult()>> chunk_creation_jobs;
 		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
-		TQueue<TFunction<ChunkPolygonizeResult()>> chunk_polygonize_jobs;
+		TQueue<TTuple<FIntVector3, bool>> chunk_polygonize_jobs;
 		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
 		int32 dim;
 		FIntVector min_coord;
@@ -71,9 +71,11 @@ private:
 	void BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coord);
 
 	//calls upon octree manager to mesh this chunk.
-	void MeshChunk(Chunk& chunk, bool negative_delta);
+	void MeshChunk(const FIntVector3& coords, bool negative_delta);
 
 	Chunk& CreateChunk(FIntVector3 coord);
+
+ 	void FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& chunk_coord, OctreeNode* root);
 
 	// try to get current render camera
 	FVector GetActiveCameraLocation();

@@ -16,14 +16,6 @@ constexpr unsigned char NODE_INTERNAL = 0;
 constexpr unsigned char NODE_LEAF = 1;
 constexpr unsigned char NODE_COLLAPSED_LEAF = 2;
 
-struct DC_LeafData
-{
-	FVector3f normal;
-	FVector3f minimizer;
-	quadric3 qef;
-	uint32 index;
-};
-
 struct DUALCONTOURINGTERRAIN_API StitchOctreeNode
 {
 	StitchOctreeNode() = default;
@@ -48,7 +40,15 @@ public:
 	unsigned char type = NODE_INTERNAL;
 	unsigned char child_mask = 0;
 	unsigned char corners = 0;
-	DC_LeafData* leaf_data = nullptr;
+
+	struct DC_LeafData
+	{
+		FVector3f normal;
+		FVector3f minimizer;
+		quadric3 qef;
+		uint32 index;
+	} leaf_data;
+
 	float size;
 };
 

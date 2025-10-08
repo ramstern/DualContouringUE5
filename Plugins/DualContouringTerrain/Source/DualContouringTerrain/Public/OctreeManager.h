@@ -14,7 +14,7 @@ class ADC_OctreeRenderActor;
 class URealtimeMeshSimple;
 
 //clamps minimizers to voxels. big if condition.
-#define CLAMP_MINIMIZERS 1
+#define CLAMP_MINIMIZERS 0
 
 namespace RealtimeMesh
 {
@@ -39,17 +39,18 @@ public:
 	// builds an octree and returns it
 	OctreeNode* BuildOctree(FVector3f center, float size);
 
-	void PolygonizeOctree(OctreeNode* node);
+	//input: specific ordering of the main node and all its neighbor nodes
+	FRealtimeMeshSectionGroupKey PolygonizeOctree(OctreeNode* node[8], bool negative_delta);
 
+	void CleanupChunkMesh(FRealtimeMeshSectionGroupKey key);
+
+	//debug draw octree node
+	void DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);
 private:
 
-	// recursive construction of child nodes
-	OctreeNode* ConstructChildNodes(OctreeNode*& node, float node_size, TArray<float>& noise_data, float root_min, float root_size);
+	void ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners);
 
-	// creation and data collection of leaf nodes
-	OctreeNode* ConstructLeafNode(OctreeNode*& node, TArray<float>& noise_data, float root_min, float root_size);
-
-	void ConstructLeafNode_V2(OctreeNode* node, FVector3f node_p, float* corner_densities, uint8 corners);
+	StitchOctreeNode* ConstructSeamOctree(OctreeNode* seam_nodes[8], bool negative_delta, MeshBuilder& builder);
 
 	// get node size from depth, could be tableized
 	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return 0.f / std::exp2f(static_cast<float>(depth)); };
@@ -78,18 +79,26 @@ private:
 
 	FORCEINLINE int32 GetDim(int32 depth) { return 1 << depth;};
 
-	//debug draw octree nodes
-	void DebugDrawOctree(OctreeNode* node, int32 current_depth);
+	
 	//debug draw dc data
 	void DebugDrawDCData(OctreeNode* node);
 	void DebugDrawNode(OctreeNode* node, float size, FColor color);
 	void DebugDrawNodeMinimizer(OctreeNode* node);
 
 	// get normal via fdm 
-	FVector3f FDMGetNormal(FVector3f at_point);
+	FVector3f FDMGetNormal(const FVector3f& at_point);
 
 	// get child index containing p from node position
-	uint8 GetChildNodeFromPosition(FVector3f p, FVector3f node_center);
+	FORCEINLINE uint8 GetChildNodeFromPosition(const FVector3f& p, const FVector3f& node_center)
+	{
+		const uint8 x = p.X > node_center.X;
+		const uint8 y = p.Y > node_center.Y;
+		const uint8 z = p.Z > node_center.Z;
+
+		//x is 0b100, y 0b010, z 0b001
+
+		return (y << 2) | (z << 1) | x;
+	}
 
 	OctreeNode* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth);
 

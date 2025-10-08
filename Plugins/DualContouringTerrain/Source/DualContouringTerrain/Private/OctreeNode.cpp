@@ -5,13 +5,12 @@
 
 OctreeNode::~OctreeNode()
 {
+	leaf_data.normal = FVector3f();
 	for (uint8 i = 0; i < 8; i++)
 	{
 		delete children[i];
 		children[i] = nullptr;
 	}
-
-	delete leaf_data;
 }
 
 StitchOctreeNode::~StitchOctreeNode()

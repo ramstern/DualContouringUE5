@@ -159,7 +159,7 @@ void ATestChunk::DualContour(TArray<float>& densities)
 		{-half_voxel_size, half_voxel_size, -half_voxel_size}
 	};
 
-	uint32 edges_corner_map[12][2] = 
+	uint32 edges_corner_map_test[12][2] = 
 	{
 		{0, 1}, {1, 2}, {2, 3}, {3, 0},
 		{4, 0}, {1, 5}, {2, 6}, {7, 3},
@@ -217,8 +217,8 @@ void ATestChunk::DualContour(TArray<float>& densities)
 
 				for (size_t i = 0; i < 3; i++)
 				{
-					unsigned char s1 = (data.solid_corners >> edges_corner_map[idx_to_edge[i]][0]) & 1;
-					unsigned char s2 = (data.solid_corners >> edges_corner_map[idx_to_edge[i]][1]) & 1;
+					unsigned char s1 = (data.solid_corners >> edges_corner_map_test[idx_to_edge[i]][0]) & 1;
+					unsigned char s2 = (data.solid_corners >> edges_corner_map_test[idx_to_edge[i]][1]) & 1;
 
 					if(s1 == s2) continue;
 
@@ -228,19 +228,19 @@ void ATestChunk::DualContour(TArray<float>& densities)
 				FVector3f mass_point{};
 				for (size_t i = 0; i < 12 && edge_count < MAX_ZERO_CROSSINGS; i++)
 				{
-					unsigned char s1 = (data.solid_corners >> edges_corner_map[i][0]) & 1;
-					unsigned char s2 = (data.solid_corners >> edges_corner_map[i][1]) & 1;
+					unsigned char s1 = (data.solid_corners >> edges_corner_map_test[i][0]) & 1;
+					unsigned char s2 = (data.solid_corners >> edges_corner_map_test[i][1]) & 1;
 
 					if(s1 == s2) continue;
 
 					//detected sign change on current edge
 
 
-					FVector3f corner_1 = voxel_corner_offsets[edges_corner_map[i][0]] + vox_pos;
-					FVector3f corner_2 = voxel_corner_offsets[edges_corner_map[i][1]] + vox_pos;
+					FVector3f corner_1 = voxel_corner_offsets[edges_corner_map_test[i][0]] + vox_pos;
+					FVector3f corner_2 = voxel_corner_offsets[edges_corner_map_test[i][1]] + vox_pos;
 
-					float d1 = densities[densityarr_indices[edges_corner_map[i][0]]] - iso_surface;
-					float d2 = densities[densityarr_indices[edges_corner_map[i][1]]] - iso_surface;
+					float d1 = densities[densityarr_indices[edges_corner_map_test[i][0]]] - iso_surface;
+					float d2 = densities[densityarr_indices[edges_corner_map_test[i][1]]] - iso_surface;
 
 					// (1-alpha)*d1 + alpha*d2 = 0
 					// d1 - alpha*d1 + alpha*d2 = 0

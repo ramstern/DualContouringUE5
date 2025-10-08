@@ -37,11 +37,17 @@ private:
 			return coord;
 		}
 
-		int32 GetStableChunkIndex(FIntVector3 c);
+		int32 GetStableChunkIndex(FIntVector3 c) const;
+
+		Chunk* TryGetChunk(FIntVector3 c);
 
 		void Realloc(int32 new_load_distance);
 
 		TArray<TOptional<Chunk>> chunks;
+		TQueue<TFunction<ChunkCreationResult()>> chunk_creation_jobs;
+		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
+		TQueue<TFunction<ChunkPolygonizeResult()>> chunk_polygonize_jobs;
+		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
 		int32 dim;
 		FIntVector min_coord;
 
@@ -63,6 +69,11 @@ private:
 
 	void InitializeChunks(FIntVector3 current_chunk_coord);
 	void BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coord);
+
+	//calls upon octree manager to mesh this chunk.
+	void MeshChunk(Chunk& chunk, bool negative_delta);
+
+	Chunk& CreateChunk(FIntVector3 coord);
 
 	// try to get current render camera
 	FVector GetActiveCameraLocation();

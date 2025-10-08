@@ -4,9 +4,37 @@
 
 #include "CoreMinimal.h"
 #include "OctreeNode.h"
-/**
- * 
- */
+
+#include "Interface/Core/RealtimeMeshKeys.h"
+
+struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
+{
+	int32 chunk_idx = -1;
+	OctreeNode* created_root = nullptr;
+
+	ChunkCreationResult() = default;
+
+	ChunkCreationResult(const ChunkCreationResult&) = delete;
+	ChunkCreationResult& operator=(const ChunkCreationResult&) = delete;
+
+	ChunkCreationResult(ChunkCreationResult&& other) noexcept;
+	ChunkCreationResult& operator=(ChunkCreationResult&& other) noexcept;
+};
+
+struct DUALCONTOURINGTERRAIN_API ChunkPolygonizeResult
+{
+	int32 chunk_idx = -1;
+	FRealtimeMeshSectionGroupKey created_mesh_key;
+
+	ChunkPolygonizeResult() = default;
+
+	ChunkPolygonizeResult(const ChunkPolygonizeResult&) = delete;
+	ChunkPolygonizeResult& operator=(const ChunkPolygonizeResult&) = delete;
+
+	ChunkPolygonizeResult(ChunkPolygonizeResult&& other) noexcept;
+	ChunkPolygonizeResult& operator=(ChunkPolygonizeResult&& other) noexcept;
+};
+
 struct DUALCONTOURINGTERRAIN_API Chunk
 {
 public:
@@ -24,4 +52,6 @@ public:
 	struct OctreeNode* root = nullptr;
 	FIntVector3 coordinates;
 	FVector3f center;
+	FRealtimeMeshSectionGroupKey mesh_group_key;
 };
+

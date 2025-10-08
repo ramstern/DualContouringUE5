@@ -21,8 +21,26 @@ public:
 	UPROPERTY(Config, EditAnywhere)
 	int32 chunk_size;
 
-	UPROPERTY(Config, EditAnywhere)
+	UPROPERTY(Config, EditAnywhere, meta = (NoRebuild = "true"))
+	bool stop_chunk_loading = false;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Debug Drawing", meta = (NoRebuild = "true"))
 	bool draw_debug_chunks;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Debug Drawing", meta = (NoRebuild = "true"))
+	bool draw_dc_data;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Debug Drawing", meta = (NoRebuild = "true"))
+	bool draw_octree;
+
+	UPROPERTY(Config, EditAnywhere, meta = (EditCondition = "draw_octree", EditConditionHides, NoRebuild = "true"), Category = "Debug Drawing")
+	bool draw_leaves;
+
+	UPROPERTY(Config, EditAnywhere, meta = (EditCondition = "draw_leaves", EditConditionHides, NoRebuild = "true"), Category = "Debug Drawing")
+	bool draw_simplified_leaves;
+
+	UPROPERTY(Config, EditAnywhere, meta = (EditCondition = "draw_octree", EditConditionHides, NoRebuild = "true"), Category = "Debug Drawing")
+	int32 debug_draw_how_deep = 1;
 
 	DECLARE_MULTICAST_DELEGATE(FOnChunkProviderSettingsChanged);
 	static FOnChunkProviderSettingsChanged& OnChanged()

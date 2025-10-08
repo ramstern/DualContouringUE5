@@ -29,7 +29,7 @@ StitchOctreeNode* LeftRecurse(OctreeNode* node, StitchOctreeNode* existing, Mesh
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -59,7 +59,7 @@ StitchOctreeNode* RightRecurse(OctreeNode* node, StitchOctreeNode* existing, Mes
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -91,7 +91,7 @@ StitchOctreeNode* BackRecurse(OctreeNode* node, StitchOctreeNode* existing, Mesh
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -123,7 +123,7 @@ StitchOctreeNode* FrontRecurse(OctreeNode* node, StitchOctreeNode* existing, Mes
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -155,7 +155,7 @@ StitchOctreeNode* TopRecurse(OctreeNode* node, StitchOctreeNode* existing, MeshB
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -187,7 +187,7 @@ StitchOctreeNode* BottomRecurse(OctreeNode* node, StitchOctreeNode* existing, Me
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -215,7 +215,7 @@ StitchOctreeNode* CornerBarRecurseTL(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -242,7 +242,7 @@ StitchOctreeNode* CornerBarRecurseTR(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -269,7 +269,7 @@ StitchOctreeNode* CornerBarRecurseTF(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -296,7 +296,7 @@ StitchOctreeNode* CornerBarRecurseTB(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -324,7 +324,7 @@ StitchOctreeNode* CornerBarRecurseBL(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -351,7 +351,7 @@ StitchOctreeNode* CornerBarRecurseBR(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -378,7 +378,7 @@ StitchOctreeNode* CornerBarRecurseBF(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -405,7 +405,7 @@ StitchOctreeNode* CornerBarRecurseBB(OctreeNode* node, StitchOctreeNode* existin
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -433,7 +433,7 @@ StitchOctreeNode* CornerBarRecurseVLB(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -460,7 +460,7 @@ StitchOctreeNode* CornerBarRecurseVRB(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -487,7 +487,7 @@ StitchOctreeNode* CornerBarRecurseVLF(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -514,7 +514,7 @@ StitchOctreeNode* CornerBarRecurseVRF(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -541,7 +541,7 @@ StitchOctreeNode* CornerMiniRecurse_0(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -567,7 +567,7 @@ StitchOctreeNode* CornerMiniRecurse_1(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -593,7 +593,7 @@ StitchOctreeNode* CornerMiniRecurse_2(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -619,7 +619,7 @@ StitchOctreeNode* CornerMiniRecurse_3(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -645,7 +645,7 @@ StitchOctreeNode* CornerMiniRecurse_4(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -671,7 +671,7 @@ StitchOctreeNode* CornerMiniRecurse_5(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -697,7 +697,7 @@ StitchOctreeNode* CornerMiniRecurse_6(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 
@@ -723,7 +723,7 @@ StitchOctreeNode* CornerMiniRecurse_7(OctreeNode* node, StitchOctreeNode* existi
 	}
 	else if (!did_exist)
 	{
-		const auto& vertex = builder.AddVertex(node->leaf_data->minimizer * inv_scale_factor).SetNormal(node->leaf_data->normal);
+		const auto& vertex = builder.AddVertex(node->leaf_data.minimizer * inv_scale_factor).SetNormal(node->leaf_data.normal);
 		existing->tri_index = vertex.GetIndex();
 	}
 

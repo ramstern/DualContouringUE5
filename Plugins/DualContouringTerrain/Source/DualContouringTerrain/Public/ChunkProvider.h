@@ -73,7 +73,7 @@ private:
 	//calls upon octree manager to mesh this chunk.
 	void MeshChunk(const FIntVector3& coords, bool negative_delta);
 
-	Chunk& CreateChunk(FIntVector3 coord);
+	void CreateChunk(FIntVector3 coord);
 
  	void FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& chunk_coord, OctreeNode* root);
 

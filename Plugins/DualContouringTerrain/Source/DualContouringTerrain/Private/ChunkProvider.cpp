@@ -54,7 +54,7 @@ void UChunkProvider::InitializeChunks(FIntVector3 current_chunk_coord)
 {
 	TArray<FIntVector3> local_chunk_indices;
 	float size = chunk_settings->chunk_size;
-	int32 load_dist = chunk_grid.dim / 2;
+	int32 load_dist = (chunk_grid.dim-1) / 2;
 
 	local_chunk_indices.Reserve(chunk_grid.dim*chunk_grid.dim*chunk_grid.dim);
 	for (int32 x = -load_dist; x < load_dist+1; x++)
@@ -80,14 +80,18 @@ void UChunkProvider::InitializeChunks(FIntVector3 current_chunk_coord)
 	{
 		FIntVector3 world_coord = current_chunk_coord + local_chunk_indices[i];
 
-		Chunk& chunk = CreateChunk(world_coord);
+		CreateChunk(world_coord);
 		MeshChunk(world_coord, true);
 	}
 }
 
 void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coord)
 {
-	int32 load_dist = chunk_grid.dim / 2;
+	int32 load_dist = (chunk_grid.dim-1) / 2;
+
+	TSet<TTuple<FIntVector3, bool>> build_coords;
+	//in most cases, one slab
+	build_coords.Reserve(chunk_grid.dim*chunk_grid.dim);
 
 	if (delta.X)
 	{
@@ -97,8 +101,7 @@ void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coor
 			for (int32 z = -load_dist; z < load_dist + 1; z++)
 			{
 				FIntVector3 coord = FIntVector3(load_dist * delta.X, y, z) + current_chunk_coord;
-				Chunk& chunk = CreateChunk(coord);
-				MeshChunk(coord, negative);
+				build_coords.Emplace(MakeTuple(coord, negative));
 			}
 		}
 	}
@@ -110,8 +113,7 @@ void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coor
 			for (int32 z = -load_dist; z < load_dist + 1; z++)
 			{
 				FIntVector3 coord = FIntVector3(x, load_dist * delta.Y, z) + current_chunk_coord;
-				Chunk& chunk = CreateChunk(coord);
-				MeshChunk(coord, negative);
+				build_coords.Emplace(MakeTuple(coord, negative));
 			}
 		}
 	}
@@ -123,11 +125,15 @@ void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coor
 			for (int32 y = -load_dist; y < load_dist + 1; y++)
 			{
 				FIntVector3 coord = FIntVector3(x, y, load_dist * delta.Z) + current_chunk_coord;
-				Chunk& chunk = CreateChunk(coord);
-
-				MeshChunk(coord, negative);
+				build_coords.Emplace(MakeTuple(coord, negative));
 			}
 		}
+	}
+
+	for (auto& t : build_coords)
+	{
+		CreateChunk(t.Key);
+		MeshChunk(t.Key, t.Value);
 	}
 }
 
@@ -136,7 +142,7 @@ void UChunkProvider::MeshChunk(const FIntVector3& coords, bool negative_delta)
 	chunk_grid.chunk_polygonize_jobs.Enqueue(MakeTuple(coords, negative_delta));	
 }
 
-Chunk& UChunkProvider::CreateChunk(FIntVector3 coord)
+void UChunkProvider::CreateChunk(FIntVector3 coord)
 {
 	float size = chunk_settings->chunk_size;
 	int32 flat_idx = chunk_grid.GetStableChunkIndex(coord);
@@ -162,8 +168,6 @@ Chunk& UChunkProvider::CreateChunk(FIntVector3 coord)
 		octree_manager->CleanupChunkMesh(chunk_grid.chunks[flat_idx].GetValue().mesh_group_key);
 	}
 	chunk_grid.chunks[flat_idx] = MoveTemp(chunk);
-
-	return chunk_grid.chunks[flat_idx].GetValue();
 }
 
 void UChunkProvider::FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& c, OctreeNode* root)

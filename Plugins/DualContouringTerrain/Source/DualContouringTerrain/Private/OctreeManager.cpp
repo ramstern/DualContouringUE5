@@ -67,6 +67,7 @@ void UOctreeManager::Initialize(FSubsystemCollectionBase& Collection)
 	octree_mesh->ClearFlags(RF_Transactional);
 
 	octree_settings->mesh_material.LoadSynchronous();
+	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.Get());
 }
 
 void UOctreeManager::Deinitialize()
@@ -114,13 +115,13 @@ constexpr unsigned char edges_corner_map[12][2] =
 	{0,1},{2,3},{4,5},{6,7}		// z-axis
 };
 
-void UOctreeManager::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners)
+void UOctreeManager::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context)
 {
 	const unsigned int MAX_ZERO_CROSSINGS = 6;
-	const int8 max_depth = octree_settings->max_depth;
-	const float iso_surface = octree_settings->iso_surface;
-	const float stddev_pos = octree_settings->stddev_pos;
-	const float stddev_normal = octree_settings->stddev_normal;
+	const int8 max_depth = settings_context.max_depth;
+	const float iso_surface = settings_context.iso_surface;
+	const float stddev_pos = settings_context.stddev_pos;
+	const float stddev_normal = settings_context.stddev_normal;
 
 	while(node->depth != max_depth)
 	{
@@ -310,7 +311,7 @@ StitchOctreeNode* UOctreeManager::ConstructSeamOctree(const TArray<OctreeNode*, 
 //};
 
 
-OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
+OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
 
@@ -324,7 +325,7 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 	root->depth = 0;
 	root->size = size;
 
-	int32 dim = GetDim(octree_settings->max_depth)+1;
+	int32 dim = GetDim(settings_context.max_depth)+1;
 
 	TArray<float> x_pos, y_pos, z_pos;
 	x_pos.SetNumUninitialized(dim * dim * dim);
@@ -355,7 +356,7 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 	}
 	int32 vox_dim = dim-1;
 
-	const float iso_surface = octree_settings->iso_surface;
+	const float iso_surface = settings_context.iso_surface;
 
 	{
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctee_voxbuilding)
@@ -398,7 +399,7 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 
 				if(corners != 255 && corners != 0)
 				{
-					ConstructLeafNode_V2(root, world_pos, corner_densities, corners);
+					ConstructLeafNode_V2(root, world_pos, corner_densities, corners, settings_context);
 				}
 			}
 		}
@@ -406,12 +407,12 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size)
 	}
 	//ConstructChildNodes(root, size, noise, root_min, );
 
-	if(octree_settings->simplify) SimplifyOctree(root);
+	if(settings_context.simplify) SimplifyOctree(root);
 
 	return root;
 }
 
-FRealtimeMeshSectionGroupKey UOctreeManager::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta)
+RealtimeMesh::FRealtimeMeshStreamSet UOctreeManager::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta, int32 chunk_idx, bool has_group_key)
 {
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
@@ -426,20 +427,17 @@ FRealtimeMeshSectionGroupKey UOctreeManager::PolygonizeOctree(const TArray<Octre
 
 	delete stitch;
 
-	const FRealtimeMeshSectionGroupKey group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", *static_cast<int32*>(static_cast<void*>(nodes[main_node[negative_delta]]))));
-
-	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.Get());
-	octree_mesh->CreateSectionGroup(group_key, stream_set);
-
-	return group_key;
+	return stream_set;
 }
 
-void UOctreeManager::CleanupChunkMesh(FRealtimeMeshSectionGroupKey key)
+void UOctreeManager::UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
 {
-	if(octree_mesh && key.IsValid())
-	{
-		octree_mesh->RemoveSectionGroup(key);
-	}
+	octree_mesh->UpdateSectionGroup(key, stream_set);
+}
+
+void UOctreeManager::CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
+{
+	octree_mesh->CreateSectionGroup(key, stream_set);
 }
 
 bool UOctreeManager::SimplifyOctree(OctreeNode* node)

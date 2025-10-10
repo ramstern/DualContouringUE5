@@ -25,6 +25,7 @@ class UChunkProvider : public UTickableWorldSubsystem
 private:
 
 	void ReloadChunks();
+	void ReloadReallocChunks();
 
 	struct ChunkGrid
 	{
@@ -43,7 +44,7 @@ private:
 
 		void Realloc(int32 new_load_distance);
 
-		TArray<TOptional<Chunk>> chunks;
+		TArray<Chunk> chunks;
 		TQueue<TFunction<ChunkCreationResult()>> chunk_creation_jobs;
 		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
 		TQueue<TTuple<FIntVector3, bool>> chunk_polygonize_jobs;
@@ -75,7 +76,11 @@ private:
 
 	void CreateChunk(FIntVector3 coord);
 
+	bool IsSafeToModifyChunks();
+
  	void FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& chunk_coord, OctreeNode* root);
+
+	FRenderCommandFence fence;
 
 	// try to get current render camera
 	FVector GetActiveCameraLocation();

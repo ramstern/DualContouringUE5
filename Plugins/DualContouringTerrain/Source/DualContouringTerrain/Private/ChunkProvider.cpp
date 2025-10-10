@@ -11,6 +11,8 @@
 #include "OctreeManager.h"
 
 
+#define USE_MULTITHREADING 1
+
 void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -19,30 +21,33 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 	//maybe for octree settings changes only rebuild the root object inside chunk
 #if WITH_EDITOR
 	UOctreeSettings::OnChanged().AddUObject(this, &UChunkProvider::ReloadChunks);
-	UChunkProviderSettings::OnChanged().AddUObject(this, &UChunkProvider::ReloadChunks);
+	UChunkProviderSettings::OnChanged().AddUObject(this, &UChunkProvider::ReloadReallocChunks);
 #endif
 
 	chunk_settings = GetDefault<UChunkProviderSettings>();
 	octree_manager = GetWorld()->GetSubsystem<UOctreeManager>();
 
-	ReloadChunks();
+	ReloadReallocChunks();
 }
 
 void UChunkProvider::Deinitialize()
 {
 	Super::Deinitialize();
-
-	for (size_t i = 0; i < chunk_grid.chunks.Num(); i++)
-	{
-		if(chunk_grid.chunks[i].IsSet())
-		{
-			octree_manager->CleanupChunkMesh(chunk_grid.chunks[i].GetValue().mesh_group_key);
-		}
-	}
 }
 
 void UChunkProvider::ReloadChunks()
 {
+	if(!IsSafeToModifyChunks()) return;
+
+	FVector cam_pos = GetActiveCameraLocation();
+	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
+	InitializeChunks(current_chunk_coord);
+}
+
+void UChunkProvider::ReloadReallocChunks()
+{
+	if (!IsSafeToModifyChunks()) return;
+
 	chunk_grid.Realloc(chunk_settings->chunk_load_distance);
 
 	FVector cam_pos = GetActiveCameraLocation();
@@ -150,24 +155,32 @@ void UChunkProvider::CreateChunk(FIntVector3 coord)
 	Chunk chunk;
 	chunk.coordinates = coord;
 	chunk.center = FVector3f(chunk.coordinates.X * size + size * 0.5f, chunk.coordinates.Y * size + size * 0.5f, chunk.coordinates.Z * size + size * 0.5f);
+	chunk.has_group_key = chunk_grid.chunks[flat_idx].has_group_key;
 
 	FVector3f chunk_center = chunk.center;
 
+	OctreeSettingsMultithreadContext settings_context;
+	settings_context = *GetDefault<UOctreeSettings>();
+
 	chunk_grid.chunk_creation_jobs.Enqueue(
-	[this, chunk_center, size, flat_idx]() -> ChunkCreationResult
+	[this, chunk_center, size, flat_idx, settings_context]() -> ChunkCreationResult
 	{
 		ChunkCreationResult result;
 		result.chunk_idx = flat_idx;
-		result.created_root = octree_manager->BuildOctree(chunk_center, size);
+		result.created_root = octree_manager->BuildOctree(chunk_center, size, settings_context);
 
 		return result;
 	});
 
-	if (chunk_grid.chunks[flat_idx].IsSet())
-	{
-		octree_manager->CleanupChunkMesh(chunk_grid.chunks[flat_idx].GetValue().mesh_group_key);
-	}
 	chunk_grid.chunks[flat_idx] = MoveTemp(chunk);
+}
+
+bool UChunkProvider::IsSafeToModifyChunks()
+{
+	bool tasks_empty = chunk_grid.chunk_creation_tasks.IsEmpty() && chunk_grid.chunk_polygonize_tasks.IsEmpty();
+	bool jobs_empty = chunk_grid.chunk_creation_jobs.IsEmpty() && chunk_grid.chunk_polygonize_jobs.IsEmpty();
+
+	return tasks_empty && jobs_empty;
 }
 
 void UChunkProvider::FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& c, OctreeNode* root)
@@ -285,14 +298,19 @@ void UChunkProvider::Tick(float DeltaTime)
 	{
 		for (size_t i = 0; i < chunk_grid.chunks.Num(); i++)
 		{
-			DrawDebugBox(GetWorld(), FVector(chunk_grid.chunks[i].GetValue().center), FVector(static_cast<float>(chunk_settings->chunk_size)*0.5f), FColor::White);
+			FVector3f chunk_center = chunk_grid.chunks[i].center;
+			DrawDebugBox(GetWorld(), FVector(chunk_center), FVector(static_cast<float>(chunk_settings->chunk_size)*0.5f), FColor::White);
+
+			DrawDebugSphere(GetWorld(), FVector(chunk_center), 100.f, 12, FColor::Emerald);
 		}
+		int32 current_flat_idx = chunk_grid.GetStableChunkIndex(current_chunk_coord);
+		GEditor->AddOnScreenDebugMessage(144, 0.1f, FColor::White, chunk_grid.chunks[current_flat_idx].coordinates.ToString());
 	}
 
 	if(chunk_settings->draw_octree) 
 	{
 		int32 idx = chunk_grid.GetStableChunkIndex(current_chunk_coord);
-		OctreeNode* node = chunk_grid.chunks[idx].GetValue().root;
+		OctreeNode* node = chunk_grid.chunks[idx].root;
 
 		octree_manager->DebugDrawOctree(node, 0, chunk_settings->draw_leaves, chunk_settings->draw_simplified_leaves, chunk_settings->debug_draw_how_deep);
 	}
@@ -306,8 +324,13 @@ void UChunkProvider::Tick(float DeltaTime)
 	{
 		TFunction<ChunkCreationResult()> job;
 		chunk_grid.chunk_creation_jobs.Dequeue(job);
-
+		
+#if USE_MULTITHREADING
 		chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::ThreadPool, MoveTemp(job)));
+#else 
+		const ChunkCreationResult result = job();
+		chunk_grid.chunks[result.chunk_idx].root = result.created_root;
+#endif
 	}
 	for (int32 i = 0; i < chunk_grid.chunk_creation_tasks.Num(); i++)
 	{
@@ -316,7 +339,7 @@ void UChunkProvider::Tick(float DeltaTime)
 		{
 			const ChunkCreationResult& creation_result = result.Get();
 
-			chunk_grid.chunks[creation_result.chunk_idx].GetValue().root = creation_result.created_root;
+			chunk_grid.chunks[creation_result.chunk_idx].root = creation_result.created_root;
 
 			chunk_grid.chunk_creation_tasks.RemoveAt(i);
 			i--; 
@@ -332,22 +355,28 @@ void UChunkProvider::Tick(float DeltaTime)
 			int32 flat_idx = chunk_grid.GetStableChunkIndex(tuple.Key);
 			bool negative_delta = tuple.Value;
 
-			OctreeNode* root = chunk_grid.chunks[flat_idx].GetValue().root;
+			OctreeNode* root = chunk_grid.chunks[flat_idx].root;
+			bool has_section_group = chunk_grid.chunks[flat_idx].has_group_key;
 
 			TArray<OctreeNode*, TInlineAllocator<8>> seam_octants;
 			seam_octants.SetNumUninitialized(8);
 			FillSeamOctreeNodes(seam_octants, negative_delta, tuple.Key, root);
 
+#if USE_MULTITHREADING
 			chunk_grid.chunk_polygonize_tasks.Add(Async(EAsyncExecution::ThreadPool,
-			[this, flat_idx, negative_delta, seam_octants]() -> ChunkPolygonizeResult
+			[this, flat_idx, negative_delta, seam_octants, has_section_group]() -> ChunkPolygonizeResult
 			{
+
 				ChunkPolygonizeResult result;
 				result.chunk_idx = flat_idx;
-
-				result.created_mesh_key = octree_manager->PolygonizeOctree(seam_octants, negative_delta);
+				result.stream_set = octree_manager->PolygonizeOctree(seam_octants, negative_delta, flat_idx, has_section_group);
+				result.created_mesh_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", flat_idx));
 
 				return result;
 			}));
+#else 
+			chunk_grid.chunks[flat_idx].mesh_group_key = octree_manager->PolygonizeOctree(seam_octants, negative_delta, flat_idx, has_section_group);
+#endif
 		}
 	}
 	for (int32 i = 0; i < chunk_grid.chunk_polygonize_tasks.Num(); i++)
@@ -357,15 +386,27 @@ void UChunkProvider::Tick(float DeltaTime)
 		{
 			const ChunkPolygonizeResult& polygonize_result = result.Get();
 
-			chunk_grid.chunks[polygonize_result.chunk_idx].GetValue().mesh_group_key = polygonize_result.created_mesh_key;
+			chunk_grid.chunks[polygonize_result.chunk_idx].mesh_group_key = polygonize_result.created_mesh_key;
+			bool& has_group_key = chunk_grid.chunks[polygonize_result.chunk_idx].has_group_key;
+
+			if (has_group_key)
+			{
+				octree_manager->UpdateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key);
+			}
+			else
+			{
+				octree_manager->CreateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key);
+			}
+
+			has_group_key = true;
 
 			chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
 			i--;
+
 		}
 	}
 
-
-	if(chunk_grid.chunk_creation_tasks.IsEmpty() && chunk_grid.chunk_polygonize_tasks.IsEmpty())
+	if(IsSafeToModifyChunks())
 	{
 		//if somehow we moved multiple chunks in 1 tick OR we just loaded in, just reinit the chunks
 		if ((current_chunk_coord - last_chunk_coord).GetAbsMax() > 1)
@@ -436,14 +477,15 @@ Chunk* UChunkProvider::ChunkGrid::TryGetChunk(FIntVector3 c)
 
 	int32 idx = GetStableChunkIndex(c);
 
-	return &chunks[idx].GetValue();
+	return &chunks[idx];
 }
 
 void UChunkProvider::ChunkGrid::Realloc(int32 new_load_distance)
 {
 	dim = (new_load_distance*2)+1;
+	chunks.Empty();
 	chunks.SetNum(dim*dim*dim);
 
-	chunk_creation_tasks.Reserve((dim * dim) + (dim * dim) + (dim * dim));
-	chunk_polygonize_tasks.Reserve((dim*dim) + (dim*dim) + (dim*dim));
+	chunk_creation_tasks.Reserve(dim * dim * dim);
+	chunk_polygonize_tasks.Reserve(dim * dim * dim);
 }

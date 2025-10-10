@@ -26,7 +26,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, meta = (UIMin = -1, UIMax = 1))
 	float iso_surface = 0.5f;
 
-	UPROPERTY(EditAnywhere, Config, Category = "Rendering", meta = (AllowedClasses = "MaterialInterface"))
+	UPROPERTY(EditAnywhere, Config, Category = "Rendering", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
 	TSoftObjectPtr<UMaterialInterface> mesh_material;
 
 	UPROPERTY(Config, EditAnywhere)
@@ -64,4 +64,17 @@ public:
 
 private:
 	FOnOctreeSettingsChanged settings_changed;
+};
+
+struct OctreeSettingsMultithreadContext
+{
+	uint32 max_depth;
+	float iso_surface;
+	bool simplify;
+	float simplify_threshold;
+	float normal_fdm_offset;
+	float stddev_pos;
+	float stddev_normal;
+
+	OctreeSettingsMultithreadContext& operator=(const UOctreeSettings&);
 };

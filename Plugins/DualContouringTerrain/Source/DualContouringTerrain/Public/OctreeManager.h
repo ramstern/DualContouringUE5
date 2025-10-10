@@ -6,7 +6,8 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "OctreeSettings.h"
 #include "OctreeNode.h"
-#include "RealtimeMeshComponent/Public/Interface/Core/RealtimeMeshKeys.h"
+#include "Interface/Core/RealtimeMeshKeys.h"
+#include "Interface/Core/RealtimeMeshDataStream.h"
 #include "OctreeManager.generated.h"
 
 class UNoiseDataGenerator;
@@ -37,18 +38,19 @@ public:
 	void PostWorldInit(UWorld* World, const UWorld::InitializationValues IVS);
 
 	// builds an octree and returns it
-	OctreeNode* BuildOctree(FVector3f center, float size);
+	OctreeNode* BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context);
 
 	//input: specific ordering of the main node and all its neighbor nodes
-	FRealtimeMeshSectionGroupKey PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta);
+	RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta, int32 chunk_idx, bool has_group_key);
 
-	void CleanupChunkMesh(FRealtimeMeshSectionGroupKey key);
+	void UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key);
+	void CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key);
 
 	//debug draw octree node
 	void DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);
 private:
 
-	void ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners);
+	void ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context);
 
 	StitchOctreeNode* ConstructSeamOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& seam_nodes, bool negative_delta, MeshBuilder& builder);
 

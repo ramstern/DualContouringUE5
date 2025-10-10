@@ -6,6 +6,7 @@
 #include "OctreeNode.h"
 
 #include "Interface/Core/RealtimeMeshKeys.h"
+#include "Interface/Core/RealtimeMeshDataStream.h"
 
 struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {
@@ -25,6 +26,7 @@ struct DUALCONTOURINGTERRAIN_API ChunkPolygonizeResult
 {
 	int32 chunk_idx = -1;
 	FRealtimeMeshSectionGroupKey created_mesh_key;
+	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 
 	ChunkPolygonizeResult() = default;
 
@@ -38,7 +40,6 @@ struct DUALCONTOURINGTERRAIN_API ChunkPolygonizeResult
 struct DUALCONTOURINGTERRAIN_API Chunk
 {
 public:
-
 	Chunk() = default;
 	~Chunk();
 
@@ -53,5 +54,6 @@ public:
 	FIntVector3 coordinates;
 	FVector3f center;
 	FRealtimeMeshSectionGroupKey mesh_group_key;
+	bool has_group_key = false;
 };
 

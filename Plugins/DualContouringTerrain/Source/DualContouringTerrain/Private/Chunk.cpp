@@ -51,7 +51,7 @@ ChunkCreationResult& ChunkCreationResult::operator=(ChunkCreationResult&& other)
 	return *this;
 }
 
-ChunkPolygonizeResult::ChunkPolygonizeResult(ChunkPolygonizeResult&& other) noexcept : chunk_idx(other.chunk_idx), created_mesh_key(other.created_mesh_key)
+ChunkPolygonizeResult::ChunkPolygonizeResult(ChunkPolygonizeResult&& other) noexcept : chunk_idx(other.chunk_idx), created_mesh_key(other.created_mesh_key), stream_set(other.stream_set)
 {
 	other.created_mesh_key = FRealtimeMeshSectionGroupKey();
 }
@@ -64,6 +64,8 @@ ChunkPolygonizeResult& ChunkPolygonizeResult::operator=(ChunkPolygonizeResult&& 
 
 		created_mesh_key = other.created_mesh_key;
 		other.created_mesh_key = FRealtimeMeshSectionGroupKey();
+
+		stream_set = MoveTemp(other.stream_set);
 	}
 
 	return *this;

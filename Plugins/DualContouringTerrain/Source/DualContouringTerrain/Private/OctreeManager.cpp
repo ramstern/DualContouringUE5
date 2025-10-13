@@ -13,6 +13,9 @@
 #include "RealtimeMeshSimple.h"
 #include "DC_OctreeRenderActor.h"
 
+//for profiling
+#define ADD_NAMED_STATS 0
+
 using uemath = pq::math<float, FVector3f, FVector3f, FMatrix3x3>;
 
 //typedef quadrid type
@@ -313,7 +316,9 @@ StitchOctreeNode* UOctreeManager::ConstructSeamOctree(const TArray<OctreeNode*, 
 
 OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context)
 {
+#if ADD_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
+#endif
 
 #if UE_BUILD_DEBUG
 	debug_edges.Empty();
@@ -351,7 +356,9 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const Octr
 
 	TArray<float> noise;
 	{
+#if ADD_NAMED_STATS
 		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_NoisePoll)
+#endif
 		noise = noise_gen->GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim*dim*dim);
 	}
 	int32 vox_dim = dim-1;
@@ -359,14 +366,18 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const Octr
 	const float iso_surface = settings_context.iso_surface;
 
 	{
+#if ADD_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctee_voxbuilding)
+#endif
 	for (size_t x = 0; x < vox_dim; x++)
 	{
 		for (size_t y = 0; y < vox_dim; y++)
 		{
 			for (size_t z = 0; z < vox_dim; z++)
 			{
+#if ADD_NAMED_STATS
 				QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_voxiteration)
+#endif
 
 				//FVector3f local_node_query_p = FVector3f(x * vox_size + vox_size * 0.5f, y * vox_size + vox_size * 0.5f, z * vox_size + vox_size * 0.5f);
 				FIntVector3 lc = FIntVector3(x, y, z);
@@ -430,14 +441,18 @@ RealtimeMesh::FRealtimeMeshStreamSet UOctreeManager::PolygonizeOctree(const TArr
 	return stream_set;
 }
 
-void UOctreeManager::UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
+TFuture<ERealtimeMeshProxyUpdateStatus> UOctreeManager::UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
 {
-	octree_mesh->UpdateSectionGroup(key, stream_set);
+	return octree_mesh->UpdateSectionGroup(key, stream_set);
 }
 
-void UOctreeManager::CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
+TFuture<ERealtimeMeshProxyUpdateStatus> UOctreeManager::CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
 {
-	octree_mesh->CreateSectionGroup(key, stream_set);
+	return octree_mesh->CreateSectionGroup(key, stream_set);
+}
+TFuture<ERealtimeMeshProxyUpdateStatus> UOctreeManager::RemoveSection(FRealtimeMeshSectionGroupKey key)
+{
+	return octree_mesh->RemoveSectionGroup(key);
 }
 
 bool UOctreeManager::SimplifyOctree(OctreeNode* node)

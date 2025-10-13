@@ -49,6 +49,7 @@ private:
 		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
 		TQueue<TTuple<FIntVector3, bool>> chunk_polygonize_jobs;
 		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
+		TArray<TFuture<ERealtimeMeshProxyUpdateStatus>> chunk_section_tasks;
 		int32 dim;
 		FIntVector min_coord;
 

@@ -37,22 +37,36 @@ void UChunkProvider::Deinitialize()
 
 void UChunkProvider::ReloadChunks()
 {
-	if(!IsSafeToModifyChunks()) return;
+	//chunk_grid.chunks.Empty();
 
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
-	InitializeChunks(current_chunk_coord);
+
+	last_chunk_coord.X += 100;
+	//InitializeChunks(current_chunk_coord);
 }
 
 void UChunkProvider::ReloadReallocChunks()
 {
 	if (!IsSafeToModifyChunks()) return;
 
+	//we might shrink the load distance, so best clean up the previously used sections in the mesh alltogether
+	for (int32 i = 0; i < chunk_grid.chunks.Num(); i++)
+	{
+		if (chunk_grid.chunks[i].has_group_key)
+		{
+			octree_manager->RemoveSection(chunk_grid.chunks[i].mesh_group_key);
+			chunk_grid.chunks[i].has_group_key = false;
+		}
+	}
+
 	chunk_grid.Realloc(chunk_settings->chunk_load_distance);
 
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
-	InitializeChunks(current_chunk_coord);
+
+	last_chunk_coord.X += 100;
+	//InitializeChunks(current_chunk_coord);
 }
 
 void UChunkProvider::InitializeChunks(FIntVector3 current_chunk_coord)
@@ -179,8 +193,9 @@ bool UChunkProvider::IsSafeToModifyChunks()
 {
 	bool tasks_empty = chunk_grid.chunk_creation_tasks.IsEmpty() && chunk_grid.chunk_polygonize_tasks.IsEmpty();
 	bool jobs_empty = chunk_grid.chunk_creation_jobs.IsEmpty() && chunk_grid.chunk_polygonize_jobs.IsEmpty();
+	bool sections_empty = chunk_grid.chunk_section_tasks.IsEmpty();
 
-	return tasks_empty && jobs_empty;
+	return tasks_empty && jobs_empty && sections_empty;
 }
 
 void UChunkProvider::FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& c, OctreeNode* root)
@@ -292,6 +307,7 @@ void UChunkProvider::Tick(float DeltaTime)
 {
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
+	chunk_grid.min_coord = current_chunk_coord - FIntVector3(chunk_grid.dim / 2);
 
 #if WITH_EDITOR
 	if(chunk_settings->draw_debug_chunks)
@@ -391,23 +407,33 @@ void UChunkProvider::Tick(float DeltaTime)
 
 			if (has_group_key)
 			{
-				octree_manager->UpdateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key);
+				chunk_grid.chunk_section_tasks.Add(octree_manager->UpdateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key));
 			}
 			else
 			{
-				octree_manager->CreateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key);
+				chunk_grid.chunk_section_tasks.Add(octree_manager->CreateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key));
 			}
 
 			has_group_key = true;
 
 			chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
 			i--;
+		}
+	}
 
+	for (int32 i = 0; i < chunk_grid.chunk_section_tasks.Num(); i++)
+	{
+		auto& task = chunk_grid.chunk_section_tasks[i];
+		if(task.IsReady())
+		{
+			chunk_grid.chunk_section_tasks.RemoveAt(i);
+			i--;
 		}
 	}
 
 	if(IsSafeToModifyChunks())
 	{
+
 		//if somehow we moved multiple chunks in 1 tick OR we just loaded in, just reinit the chunks
 		if ((current_chunk_coord - last_chunk_coord).GetAbsMax() > 1)
 		{
@@ -421,7 +447,6 @@ void UChunkProvider::Tick(float DeltaTime)
 		}
 
 		last_chunk_coord = current_chunk_coord;
-		chunk_grid.min_coord = current_chunk_coord - FIntVector3(chunk_grid.dim / 2);
 	}	
 
 }
@@ -483,9 +508,11 @@ Chunk* UChunkProvider::ChunkGrid::TryGetChunk(FIntVector3 c)
 void UChunkProvider::ChunkGrid::Realloc(int32 new_load_distance)
 {
 	dim = (new_load_distance*2)+1;
-	chunks.Empty();
+	//chunks.Empty();
+
 	chunks.SetNum(dim*dim*dim);
 
 	chunk_creation_tasks.Reserve(dim * dim * dim);
 	chunk_polygonize_tasks.Reserve(dim * dim * dim);
+	chunk_section_tasks.Reserve(dim * dim * dim);
 }

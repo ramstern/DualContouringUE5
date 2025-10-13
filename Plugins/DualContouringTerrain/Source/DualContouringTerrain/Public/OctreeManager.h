@@ -43,8 +43,9 @@ public:
 	//input: specific ordering of the main node and all its neighbor nodes
 	RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta, int32 chunk_idx, bool has_group_key);
 
-	void UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key);
-	void CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key);
+	TFuture<ERealtimeMeshProxyUpdateStatus> UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key);
+	TFuture<ERealtimeMeshProxyUpdateStatus> CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key);
+	TFuture<ERealtimeMeshProxyUpdateStatus> RemoveSection(FRealtimeMeshSectionGroupKey key);
 
 	//debug draw octree node
 	void DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);

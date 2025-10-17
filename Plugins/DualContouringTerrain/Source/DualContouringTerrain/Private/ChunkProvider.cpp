@@ -1,16 +1,20 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "ChunkProvider.h"
+#include "DC_ChunkProvider.h"
 #include "Kismet/GameplayStatics.h"
 #if WITH_EDITOR
 #include "LevelEditorViewport.h"
 #endif
-#include "OctreeSettings.h"
-#include "ChunkProviderSettings.h"
-#include "OctreeManager.h"
+#include "DC_OctreeSettings.h"
+#include "DC_ChunkProviderSettings.h"
+#include "DC_OctreeCode.h"
+#include "DC_OctreeRenderActor.h"
+#include "RealtimeMeshComponent.h"
+#include "RealtimeMeshSimple.h"
 
 
+#define USE_NAMED_STATS 1
 #define USE_MULTITHREADING 1
 
 void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
@@ -24,8 +28,47 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 	UChunkProviderSettings::OnChanged().AddUObject(this, &UChunkProvider::ReloadReallocChunks);
 #endif
 
+	//Collection.InitializeDependency(UAOctreeCode::StaticClass());
+
 	chunk_settings = GetDefault<UChunkProviderSettings>();
-	octree_manager = GetWorld()->GetSubsystem<UOctreeManager>();
+	octree_manager = GEngine->GetEngineSubsystem<UOctreeCode>();
+
+	FActorSpawnParameters Params;
+	Params.Name = TEXT("DC_OctreeRenderActor");
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.ObjectFlags = RF_Transient;                // don’t save to map
+	Params.bNoFail = true;
+
+#if WITH_EDITOR
+	//Params.bHideFromSceneOutliner = true;
+#endif
+
+	ADC_OctreeRenderActor* created_render_actor = GetWorld()->SpawnActor<ADC_OctreeRenderActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	if (created_render_actor)
+	{
+#if WITH_EDITOR
+		created_render_actor->bIsEditorOnlyActor = (GetWorld()->WorldType == EWorldType::Editor);
+		created_render_actor->SetActorLabel(TEXT("Octree Render (Transient)"));
+		created_render_actor->ClearFlags(EObjectFlags::RF_Transactional);
+
+#endif
+		if (UActorComponent* root = created_render_actor->GetRootComponent())
+		{
+			root->SetFlags(RF_Transient);
+			root->ClearFlags(RF_Transactional);                             // <- important
+		}
+
+		//created_render_actor->AddToRoot();
+
+		render_actor = created_render_actor;
+	}
+
+
+	//FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &UOctreeCode::PostWorldInit);
+
+	/*octree_mesh = render_actor->mesh_component->InitializeRealtimeMesh<URealtimeMeshSimple>();
+	octree_mesh->SetFlags(RF_Transient);
+	octree_mesh->ClearFlags(RF_Transactional);*/
 
 	ReloadReallocChunks();
 }
@@ -33,40 +76,47 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 void UChunkProvider::Deinitialize()
 {
 	Super::Deinitialize();
+
+	//render_actor->RemoveFromRoot();
+	render_actor->Destroy();
+	render_actor = nullptr;
+
+	octree_mesh = nullptr;
 }
 
 void UChunkProvider::ReloadChunks()
 {
 	//chunk_grid.chunks.Empty();
 
+	render_actor->DestroyAllRMCs();
+
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
 
 	last_chunk_coord.X += 100;
-	//InitializeChunks(current_chunk_coord);
 }
 
 void UChunkProvider::ReloadReallocChunks()
 {
 	if (!IsSafeToModifyChunks()) return;
 
-	//we might shrink the load distance, so best clean up the previously used sections in the mesh alltogether
-	for (int32 i = 0; i < chunk_grid.chunks.Num(); i++)
-	{
-		if (chunk_grid.chunks[i].has_group_key)
-		{
-			octree_manager->RemoveSection(chunk_grid.chunks[i].mesh_group_key);
-			chunk_grid.chunks[i].has_group_key = false;
-		}
-	}
+	////we might shrink the load distance, so best clean up the previously used sections in the mesh alltogether
+	//for (int32 i = 0; i < chunk_grid.chunks.Num(); i++)
+	//{
+	//	if (chunk_grid.chunks[i].has_group_key)
+	//	{
+	//		octree_manager->RemoveSection(chunk_grid.chunks[i].mesh_group_key);
+	//		chunk_grid.chunks[i].has_group_key = false;
+	//	}
+	//}
 
+	render_actor->DestroyAllRMCs();
 	chunk_grid.Realloc(chunk_settings->chunk_load_distance);
 
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
 
 	last_chunk_coord.X += 100;
-	//InitializeChunks(current_chunk_coord);
 }
 
 void UChunkProvider::InitializeChunks(FIntVector3 current_chunk_coord)
@@ -158,6 +208,7 @@ void UChunkProvider::BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coor
 
 void UChunkProvider::MeshChunk(const FIntVector3& coords, bool negative_delta)
 {
+	//return;
 	chunk_grid.chunk_polygonize_jobs.Enqueue(MakeTuple(coords, negative_delta));	
 }
 
@@ -166,11 +217,19 @@ void UChunkProvider::CreateChunk(FIntVector3 coord)
 	float size = chunk_settings->chunk_size;
 	int32 flat_idx = chunk_grid.GetStableChunkIndex(coord);
 
+	if(chunk_grid.chunks[flat_idx].mesh)
+	{
+		auto rmc = static_cast<URealtimeMeshComponent*>(chunk_grid.chunks[flat_idx].mesh->GetOuter());
+		render_actor->DestroyRMC(rmc);
+	}
+
 	Chunk chunk;
 	chunk.coordinates = coord;
 	chunk.center = FVector3f(chunk.coordinates.X * size + size * 0.5f, chunk.coordinates.Y * size + size * 0.5f, chunk.coordinates.Z * size + size * 0.5f);
 	chunk.has_group_key = chunk_grid.chunks[flat_idx].has_group_key;
+	chunk.mesh = render_actor->CreateRMComponentMesh();
 
+	
 	FVector3f chunk_center = chunk.center;
 
 	OctreeSettingsMultithreadContext settings_context;
@@ -305,6 +364,11 @@ FVector UChunkProvider::GetActiveCameraLocation()
 
 void UChunkProvider::Tick(float DeltaTime)
 {
+	//we need this, as otherwise it will tick twice when PIE' ing
+#if WITH_EDITOR
+	if(GEditor->PlayWorld != nullptr && (GetWorld()->WorldType == EWorldType::Editor || GetWorld()->WorldType == EWorldType::EditorPreview)) return; 
+#endif
+
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
 	chunk_grid.min_coord = current_chunk_coord - FIntVector3(chunk_grid.dim / 2);
@@ -315,9 +379,16 @@ void UChunkProvider::Tick(float DeltaTime)
 		for (size_t i = 0; i < chunk_grid.chunks.Num(); i++)
 		{
 			FVector3f chunk_center = chunk_grid.chunks[i].center;
+
+			FIntVector3 c = chunk_grid.chunks[i].coordinates;
+
+			int32 dist = FMath::Sqrt(static_cast<float>((c.X - current_chunk_coord.X)*(c.X-current_chunk_coord.X) + (c.Y - current_chunk_coord.Y) * (c.Y - current_chunk_coord.Y) + (c.Z - current_chunk_coord.Z) * (c.Z - current_chunk_coord.Z)));
+
+			if(dist > chunk_settings->chunk_draw_max_dist) continue; 
+
 			DrawDebugBox(GetWorld(), FVector(chunk_center), FVector(static_cast<float>(chunk_settings->chunk_size)*0.5f), FColor::White);
 
-			DrawDebugSphere(GetWorld(), FVector(chunk_center), 100.f, 12, FColor::Emerald);
+			//DrawDebugSphere(GetWorld(), FVector(chunk_center), 100.f, 12, FColor::Emerald);
 		}
 		int32 current_flat_idx = chunk_grid.GetStableChunkIndex(current_chunk_coord);
 		GEditor->AddOnScreenDebugMessage(144, 0.1f, FColor::White, chunk_grid.chunks[current_flat_idx].coordinates.ToString());
@@ -340,9 +411,9 @@ void UChunkProvider::Tick(float DeltaTime)
 	{
 		TFunction<ChunkCreationResult()> job;
 		chunk_grid.chunk_creation_jobs.Dequeue(job);
-		
+
 #if USE_MULTITHREADING
-		chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::ThreadPool, MoveTemp(job)));
+		chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, MoveTemp(job)));
 #else 
 		const ChunkCreationResult result = job();
 		chunk_grid.chunks[result.chunk_idx].root = result.created_root;
@@ -379,13 +450,12 @@ void UChunkProvider::Tick(float DeltaTime)
 			FillSeamOctreeNodes(seam_octants, negative_delta, tuple.Key, root);
 
 #if USE_MULTITHREADING
-			chunk_grid.chunk_polygonize_tasks.Add(Async(EAsyncExecution::ThreadPool,
+			chunk_grid.chunk_polygonize_tasks.Add(Async(EAsyncExecution::LargeThreadPool,
 			[this, flat_idx, negative_delta, seam_octants, has_section_group]() -> ChunkPolygonizeResult
 			{
-
 				ChunkPolygonizeResult result;
 				result.chunk_idx = flat_idx;
-				result.stream_set = octree_manager->PolygonizeOctree(seam_octants, negative_delta, flat_idx, has_section_group);
+				result.stream_set = octree_manager->PolygonizeOctree(seam_octants, negative_delta, flat_idx);
 				result.created_mesh_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", flat_idx));
 
 				return result;
@@ -400,19 +470,18 @@ void UChunkProvider::Tick(float DeltaTime)
 		auto& result = chunk_grid.chunk_polygonize_tasks[i];
 		if (result.IsReady())
 		{
+#if USE_NAMED_STATS
+			QUICK_SCOPE_CYCLE_COUNTER(Stat_CreateOrUpdateMesh)
+#endif
 			const ChunkPolygonizeResult& polygonize_result = result.Get();
 
-			chunk_grid.chunks[polygonize_result.chunk_idx].mesh_group_key = polygonize_result.created_mesh_key;
-			bool& has_group_key = chunk_grid.chunks[polygonize_result.chunk_idx].has_group_key;
+			Chunk& chunk = chunk_grid.chunks[polygonize_result.chunk_idx];
 
-			if (has_group_key)
-			{
-				chunk_grid.chunk_section_tasks.Add(octree_manager->UpdateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key));
-			}
-			else
-			{
-				chunk_grid.chunk_section_tasks.Add(octree_manager->CreateSection(polygonize_result.stream_set, polygonize_result.created_mesh_key));
-			}
+			chunk.mesh_group_key = polygonize_result.created_mesh_key;
+			bool& has_group_key = chunk.has_group_key;
+			
+			//create / update mesh section of chunk
+			chunk_grid.chunk_section_tasks.Add(chunk.mesh->CreateSectionGroup(chunk.mesh_group_key, polygonize_result.stream_set));
 
 			has_group_key = true;
 
@@ -420,7 +489,6 @@ void UChunkProvider::Tick(float DeltaTime)
 			i--;
 		}
 	}
-
 	for (int32 i = 0; i < chunk_grid.chunk_section_tasks.Num(); i++)
 	{
 		auto& task = chunk_grid.chunk_section_tasks[i];
@@ -508,7 +576,6 @@ Chunk* UChunkProvider::ChunkGrid::TryGetChunk(FIntVector3 c)
 void UChunkProvider::ChunkGrid::Realloc(int32 new_load_distance)
 {
 	dim = (new_load_distance*2)+1;
-	//chunks.Empty();
 
 	chunks.SetNum(dim*dim*dim);
 

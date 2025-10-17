@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "OctreeSettings.h"
+#include "DC_OctreeSettings.h"
 
 UOctreeSettings::UOctreeSettings()
 {
@@ -11,6 +11,7 @@ UOctreeSettings::UOctreeSettings()
 
 OctreeSettingsMultithreadContext& OctreeSettingsMultithreadContext::operator=(const UOctreeSettings& settings)
 {
+	seed = settings.noise_seed;
 	max_depth = settings.max_depth;
 	iso_surface = settings.iso_surface;
 	simplify = settings.simplify;

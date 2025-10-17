@@ -4,14 +4,17 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "Chunk.h"
-#include "ChunkProviderSettings.h"
+#include "DC_Chunk.h"
+#include "DC_ChunkProviderSettings.h"
 #include "Misc/Optional.h"
-#include "ChunkProvider.generated.h"
+#include "DC_ChunkProvider.generated.h"
 /**
  * 
  */
-class UOctreeManager;
+class UOctreeCode;
+struct OctreeNode;
+class ADC_OctreeRenderActor;
+class URealtimeMeshSimple;
 
 UCLASS()
 class UChunkProvider : public UTickableWorldSubsystem
@@ -67,7 +70,7 @@ private:
 	};
 
 	const UChunkProviderSettings* chunk_settings = nullptr;
-	UOctreeManager* octree_manager = nullptr;
+	UOctreeCode* octree_manager = nullptr;
 
 	void InitializeChunks(FIntVector3 current_chunk_coord);
 	void BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coord);
@@ -81,13 +84,15 @@ private:
 
  	void FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& chunk_coord, OctreeNode* root);
 
-	FRenderCommandFence fence;
-
 	// try to get current render camera
 	FVector GetActiveCameraLocation();
 
 	FVector camera_pos = FVector();
 	FIntVector3 last_chunk_coord = FIntVector3(-1000, -1000, -1000);
+	
+	// actor for rendering the octree mesh
+	ADC_OctreeRenderActor* render_actor = nullptr;
+	URealtimeMeshSimple* octree_mesh = nullptr;
 
 	virtual void Tick(float DeltaTime) override;
 	TStatId GetStatId() const override;

@@ -1,16 +1,17 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Chunk.h"
+#include "DC_Chunk.h"
 
 Chunk::~Chunk()
 {
 	delete root;
 }
 
-Chunk::Chunk(Chunk&& other) noexcept : root(other.root), coordinates(other.coordinates), center(other.center), mesh_group_key(other.mesh_group_key)
+Chunk::Chunk(Chunk&& other) noexcept : root(other.root), coordinates(other.coordinates), center(other.center), mesh_group_key(other.mesh_group_key), mesh(other.mesh)
 {
 	other.root = nullptr;
+	other.mesh = nullptr;
 	other.mesh_group_key = FRealtimeMeshSectionGroupKey();
 }
 
@@ -20,8 +21,11 @@ Chunk& Chunk::operator=(Chunk&& other) noexcept
 	{
 		coordinates = other.coordinates;
 		center = other.center;
-		mesh_group_key = other.mesh_group_key;
 
+		mesh = other.mesh;
+		other.mesh = nullptr;
+
+		mesh_group_key = other.mesh_group_key;
 		other.mesh_group_key = FRealtimeMeshSectionGroupKey();
 
 		delete root;

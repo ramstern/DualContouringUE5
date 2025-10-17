@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "OctreeNode.h"
+#include "DC_OctreeNode.h"
 
 #include "Interface/Core/RealtimeMeshKeys.h"
 #include "Interface/Core/RealtimeMeshDataStream.h"
@@ -37,6 +37,8 @@ struct DUALCONTOURINGTERRAIN_API ChunkPolygonizeResult
 	ChunkPolygonizeResult& operator=(ChunkPolygonizeResult&& other) noexcept;
 };
 
+class URealtimeMeshSimple;
+
 struct DUALCONTOURINGTERRAIN_API Chunk
 {
 public:
@@ -54,6 +56,7 @@ public:
 	FIntVector3 coordinates;
 	FVector3f center;
 	FRealtimeMeshSectionGroupKey mesh_group_key;
+	URealtimeMeshSimple* mesh = nullptr;
 	bool has_group_key = false;
 };
 

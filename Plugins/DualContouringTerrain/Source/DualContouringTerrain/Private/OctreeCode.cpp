@@ -1,96 +1,45 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "OctreeManager.h"
-#include "OctreeSettings.h"
+#include "DC_OctreeCode.h"
+#include "DC_OctreeSettings.h"
 
-#include "NoiseDataGenerator.h"
-#include "OctreeNode.h"
+#include "DC_NoiseDataGenerator.h"
+#include "DC_OctreeNode.h"
 #include <cmath>
 #include "probabilistic-quadrics.hh"
 #include "DC_Mat3x3.h"
-#include "RealtimeMeshComponent.h"
-#include "RealtimeMeshSimple.h"
+#include "Interface/Core/RealtimeMeshBuilder.h"
+//#include "RealtimeMeshComponent.h"
+//#include "RealtimeMeshSimple.h"
 #include "DC_OctreeRenderActor.h"
 
 //for profiling
-#define ADD_NAMED_STATS 0
+#define USE_NAMED_STATS 1
 
 using uemath = pq::math<float, FVector3f, FVector3f, FMatrix3x3>;
 
 //typedef quadrid type
 using quadric3 = pq::quadric<uemath>;
 
-void UOctreeManager::Initialize(FSubsystemCollectionBase& Collection)
+void UOctreeCode::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
 	octree_settings = GetDefault<UOctreeSettings>();
 
+	Collection.InitializeDependency(UNoiseDataGenerator::StaticClass());
+
 	noise_gen = GEngine->GetEngineSubsystem<UNoiseDataGenerator>();
-
-	FActorSpawnParameters Params;
-	Params.Name = TEXT("DC_OctreeRenderActor");
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Params.ObjectFlags = RF_Transient;                // don’t save to map
-	Params.bNoFail = true;
-
-#if WITH_EDITOR
-	Params.bHideFromSceneOutliner = true;
-#endif
-
-	ADC_OctreeRenderActor* created_render_actor = GetWorld()->SpawnActor<ADC_OctreeRenderActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
-	if (created_render_actor)
-	{
-#if WITH_EDITOR
-		created_render_actor->bIsEditorOnlyActor = (GetWorld()->WorldType == EWorldType::Editor);
-		created_render_actor->SetActorLabel(TEXT("Octree Render (Transient)"));
-		created_render_actor->ClearFlags(EObjectFlags::RF_Transactional);
-
-		if (UActorComponent* root = created_render_actor->GetRootComponent())
-		{
-			root->SetFlags(RF_Transient);
-			root->ClearFlags(RF_Transactional);                             // <- important
-		}
-
-		if (auto* rmc = created_render_actor->mesh_component)
-		{
-			rmc->SetFlags(RF_Transient);
-			rmc->ClearFlags(RF_Transactional);                              // <- important
-		}
-#endif
-		render_actor = created_render_actor;
-	}		
-
-
-	FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &UOctreeManager::PostWorldInit);
-
-	octree_mesh = render_actor->mesh_component->InitializeRealtimeMesh<URealtimeMeshSimple>();
-	octree_mesh->SetFlags(RF_Transient);
-	octree_mesh->ClearFlags(RF_Transactional);
-
-	octree_settings->mesh_material.LoadSynchronous();
-	octree_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.Get());
 }
 
-void UOctreeManager::Deinitialize()
+void UOctreeCode::Deinitialize()
 {
 	Super::Deinitialize();
 
 #if WITH_EDITOR
 	UOctreeSettings::OnChanged().RemoveAll(this);
 #endif
-
-	render_actor->Destroy();
-	render_actor = nullptr;
-
-	octree_mesh = nullptr;
-}
-
-void UOctreeManager::PostWorldInit(UWorld* World, const UWorld::InitializationValues IVS)
-{
-	//stupid rmc bug where materials do not apply after creation? this fixes it
-	render_actor->mesh_component->ReregisterComponent();
 }
 
 FVector3f child_offsets[8] =
@@ -118,13 +67,15 @@ constexpr unsigned char edges_corner_map[12][2] =
 	{0,1},{2,3},{4,5},{6,7}		// z-axis
 };
 
-void UOctreeManager::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context)
+void UOctreeCode::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context)
 {
 	const unsigned int MAX_ZERO_CROSSINGS = 6;
 	const int8 max_depth = settings_context.max_depth;
 	const float iso_surface = settings_context.iso_surface;
 	const float stddev_pos = settings_context.stddev_pos;
 	const float stddev_normal = settings_context.stddev_normal;
+	const float fdm_normal_offset = settings_context.normal_fdm_offset;
+	const int32 seed = settings_context.seed;
 
 	while(node->depth != max_depth)
 	{
@@ -197,7 +148,7 @@ void UOctreeManager::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& nod
 		//at 32 vox size, i dont think it's worth doing better zero crossing. below usually gives values in order of 0.001 > x > -0.001
 		//float alpha_density = noise_gen->GetNoiseSingle3D(intersection.X * scale_factor, intersection.Y * scale_factor, intersection.Z * scale_factor) - octree_settings->iso_surface;
 
-		FVector3f normal = FDMGetNormal(intersection * scale_factor);
+		FVector3f normal = FDMGetNormal(intersection * scale_factor, fdm_normal_offset, seed);
 		vert_normal += normal;
 
 		vox_pq += quadric3::probabilistic_plane_quadric(intersection * scale_factor, normal, stddev_pos, stddev_normal);
@@ -274,7 +225,7 @@ constexpr recfunc_sig other_seam_operations[2][7] =
 	{BackRecurse, BottomRecurse, CornerBarRecurseBB, LeftRecurse, CornerBarRecurseVLB, CornerBarRecurseBL, CornerMiniRecurse_0}
 };
 
-StitchOctreeNode* UOctreeManager::ConstructSeamOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& seam_nodes, bool nd, MeshBuilder& builder)
+StitchOctreeNode* UOctreeCode::ConstructSeamOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& seam_nodes, bool nd, MeshBuilder& builder)
 {
 	//this node recursion (no special case needed)
 	StitchOctreeNode* stitch_main = main_seam_operations[nd][0](seam_nodes[main_node[nd]], nullptr, builder);
@@ -314,9 +265,9 @@ StitchOctreeNode* UOctreeManager::ConstructSeamOctree(const TArray<OctreeNode*, 
 //};
 
 
-OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context)
+OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context)
 {
-#if ADD_NAMED_STATS
+#if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
 #endif
 
@@ -356,17 +307,17 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const Octr
 
 	TArray<float> noise;
 	{
-#if ADD_NAMED_STATS
+#if USE_NAMED_STATS
 		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_NoisePoll)
 #endif
-		noise = noise_gen->GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim*dim*dim);
+		noise = UNoiseDataGenerator::GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim*dim*dim, settings_context.seed);
 	}
 	int32 vox_dim = dim-1;
 
 	const float iso_surface = settings_context.iso_surface;
 
 	{
-#if ADD_NAMED_STATS
+#if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctee_voxbuilding)
 #endif
 	for (size_t x = 0; x < vox_dim; x++)
@@ -375,7 +326,7 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const Octr
 		{
 			for (size_t z = 0; z < vox_dim; z++)
 			{
-#if ADD_NAMED_STATS
+#if USE_NAMED_STATS
 				QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_voxiteration)
 #endif
 
@@ -418,12 +369,12 @@ OctreeNode* UOctreeManager::BuildOctree(FVector3f center, float size, const Octr
 	}
 	//ConstructChildNodes(root, size, noise, root_min, );
 
-	if(settings_context.simplify) SimplifyOctree(root);
+	if(settings_context.simplify) SimplifyOctree(root, settings_context.simplify_threshold);
 
 	return root;
 }
 
-RealtimeMesh::FRealtimeMeshStreamSet UOctreeManager::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta, int32 chunk_idx, bool has_group_key)
+RealtimeMesh::FRealtimeMeshStreamSet UOctreeCode::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta, int32 chunk_idx)
 {
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
@@ -441,21 +392,7 @@ RealtimeMesh::FRealtimeMeshStreamSet UOctreeManager::PolygonizeOctree(const TArr
 	return stream_set;
 }
 
-TFuture<ERealtimeMeshProxyUpdateStatus> UOctreeManager::UpdateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
-{
-	return octree_mesh->UpdateSectionGroup(key, stream_set);
-}
-
-TFuture<ERealtimeMeshProxyUpdateStatus> UOctreeManager::CreateSection(const RealtimeMesh::FRealtimeMeshStreamSet& stream_set, FRealtimeMeshSectionGroupKey key)
-{
-	return octree_mesh->CreateSectionGroup(key, stream_set);
-}
-TFuture<ERealtimeMeshProxyUpdateStatus> UOctreeManager::RemoveSection(FRealtimeMeshSectionGroupKey key)
-{
-	return octree_mesh->RemoveSectionGroup(key);
-}
-
-bool UOctreeManager::SimplifyOctree(OctreeNode* node)
+bool UOctreeCode::SimplifyOctree(OctreeNode* node, float simplify_threshold)
 {
 	if(!node) return false;
 
@@ -472,7 +409,7 @@ bool UOctreeManager::SimplifyOctree(OctreeNode* node)
 
 	for (uint8 i = 0; i < 8; i++)
 	{
-		if(SimplifyOctree(node->children[i])) // returns true if node exists
+		if(SimplifyOctree(node->children[i], simplify_threshold)) // returns true if node exists
 		{
 			mid_sign = (node->children[i]->corners >> (7 - i)) & 1;
 			if (!simplify) continue;
@@ -507,7 +444,7 @@ bool UOctreeManager::SimplifyOctree(OctreeNode* node)
 	float error = node_pq(minimizer);
 
 	//possible simplification doesn't approximate the surface well->return
-	if(error > octree_settings->simplify_threshold) 
+	if(error > simplify_threshold) 
 	{
 		return true;
 	}
@@ -533,7 +470,7 @@ bool UOctreeManager::SimplifyOctree(OctreeNode* node)
 	return true;
 }
 
-void UOctreeManager::BuildMeshData(OctreeNode* node, MeshBuilder& builder)
+void UOctreeCode::BuildMeshData(OctreeNode* node, MeshBuilder& builder)
 {
 	if(!node) return;
 	
@@ -551,9 +488,7 @@ void UOctreeManager::BuildMeshData(OctreeNode* node, MeshBuilder& builder)
 	}
 }
 
-
-
-void UOctreeManager::BuildStitchMeshData(OctreeNode* node, OctreeNode* parent, MeshBuilder& builder)
+void UOctreeCode::BuildStitchMeshData(OctreeNode* node, OctreeNode* parent, MeshBuilder& builder)
 {
 	// left x side
 	// AI gave me this self idea... interesting way to avoid declaring the lambda function
@@ -605,7 +540,7 @@ constexpr unsigned char process_cell_face_nodes[12][3] =
 constexpr unsigned char process_edge_nodes[6][5] = 
 { {0,1,2,3,0},{4,5,6,7,0},{0,4,1,5,1},{2,6,3,7,1},{0,2,4,6,2},{1,3,5,7,2} };
 
-void UOctreeManager::DC_ProcessCell(OctreeNode* node, MeshBuilder& builder)
+void UOctreeCode::DC_ProcessCell(OctreeNode* node, MeshBuilder& builder)
 {
 	if(!node) return;
 
@@ -666,7 +601,7 @@ constexpr unsigned char process_face_edge_nodes[3][4][6] = {
 	{{1,1,0,3,2,0},{1,5,4,7,6,0},{0,1,5,0,4,1},{0,3,7,2,6,1}}
 };
 
-void UOctreeManager::DC_ProcessFace(OctreeNode* node_1, OctreeNode* node_2, unsigned char direction, MeshBuilder& builder)
+void UOctreeCode::DC_ProcessFace(OctreeNode* node_1, OctreeNode* node_2, unsigned char direction, MeshBuilder& builder)
 {
 	if(!(node_1 && node_2)) return;
 
@@ -801,7 +736,7 @@ constexpr unsigned char edge_corners[12][2] =
 	{0,1},{2,3},{4,5},{6,7}
 };
 
-void UOctreeManager::DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, OctreeNode* node_3, OctreeNode* node_4, unsigned char direction, MeshBuilder& builder)
+void UOctreeCode::DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, OctreeNode* node_3, OctreeNode* node_4, unsigned char direction, MeshBuilder& builder)
 {
 	if(!(node_1 && node_2 && node_3 && node_4)) return;
 
@@ -892,7 +827,7 @@ void UOctreeManager::DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, Octr
 	}
 }
 
-void UOctreeManager::DC_ProcessCell(StitchOctreeNode* node, MeshBuilder& builder)
+void UOctreeCode::DC_ProcessCell(StitchOctreeNode* node, MeshBuilder& builder)
 {
 	if (!node) return;
 
@@ -924,7 +859,7 @@ void UOctreeManager::DC_ProcessCell(StitchOctreeNode* node, MeshBuilder& builder
 	}
 }
 
-void UOctreeManager::DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* node_2, unsigned char direction, MeshBuilder& builder)
+void UOctreeCode::DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* node_2, unsigned char direction, MeshBuilder& builder)
 {
 	if (!(node_1 && node_2)) return;
 
@@ -1020,7 +955,7 @@ void UOctreeManager::DC_ProcessFace(StitchOctreeNode* node_1, StitchOctreeNode* 
 	}
 }
 
-void UOctreeManager::DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* node_2, StitchOctreeNode* node_3, StitchOctreeNode* node_4, unsigned char direction, MeshBuilder& builder)
+void UOctreeCode::DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* node_2, StitchOctreeNode* node_3, StitchOctreeNode* node_4, unsigned char direction, MeshBuilder& builder)
 {
 	if (!(node_1 && node_2 && node_3 && node_4)) return;
 
@@ -1112,7 +1047,7 @@ void UOctreeManager::DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* 
 }
 
 
-void UOctreeManager::DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep)
+void UOctreeCode::DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep)
 {
 	if(!node || current_depth == how_deep) return;
 
@@ -1138,7 +1073,7 @@ void UOctreeManager::DebugDrawOctree(OctreeNode* node, int32 current_depth, bool
 	}
 }
 
-void UOctreeManager::DebugDrawDCData(OctreeNode* node)
+void UOctreeCode::DebugDrawDCData(OctreeNode* node)
 {
 #if UE_BUILD_DEBUG
 	for (size_t i = 0; i < debug_edges.Num(); i++)
@@ -1149,12 +1084,12 @@ void UOctreeManager::DebugDrawDCData(OctreeNode* node)
 	DebugDrawNodeMinimizer(node);
 }
 
-void UOctreeManager::DebugDrawNode(OctreeNode* node, float size, FColor color)
+void UOctreeCode::DebugDrawNode(OctreeNode* node, float size, FColor color)
 {
 	DrawDebugBox(GetWorld(), FVector(node->center), FVector(size * 0.5f), color);
 }
 
-void UOctreeManager::DebugDrawNodeMinimizer(OctreeNode* node)
+void UOctreeCode::DebugDrawNodeMinimizer(OctreeNode* node)
 {
 	if(!node) return;
 
@@ -1176,16 +1111,14 @@ void UOctreeManager::DebugDrawNodeMinimizer(OctreeNode* node)
 	
 }
 
-FVector3f UOctreeManager::FDMGetNormal(const FVector3f& at_point)
+FVector3f UOctreeCode::FDMGetNormal(const FVector3f& at_point, float h, int32 seed)
 {
-	const float h = octree_settings->normal_fdm_offset;
-
 	//x, y, z axii order
 	const float x_positions[6] = { at_point.X + h,  at_point.X - h, at_point.X, at_point.X, at_point.X, at_point.X };
 	const float y_positions[6] = { at_point.Y,  at_point.Y, at_point.Y + h, at_point.Y - h, at_point.Y, at_point.Y };
 	const float z_positions[6] = { at_point.Z,  at_point.Z, at_point.Z, at_point.Z, at_point.Z + h, at_point.Z - h };
 
-	TArray<float> noise = noise_gen->GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 6);
+	TArray<float> noise = UNoiseDataGenerator::GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 6, seed);
 
 	FVector3f normal = FVector3f(noise[0] - noise[1], noise[2] - noise[3], noise[4] - noise[5]);
 
@@ -1201,7 +1134,7 @@ FVector3f UOctreeManager::FDMGetNormal(const FVector3f& at_point)
 	return normal.GetUnsafeNormal();
 }
 
-OctreeNode* UOctreeManager::GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth)
+OctreeNode* UOctreeCode::GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth)
 {
 	OctreeNode* current = start;
 	while(current->depth != depth)
@@ -1211,19 +1144,4 @@ OctreeNode* UOctreeManager::GetNodeFromPositionDepth(OctreeNode* start, FVector3
 	}
 
 	return current;
-}
-
-bool UOctreeManager::DoesSupportWorldType(EWorldType::Type type) const
-{
-	return type == EWorldType::Game || type == EWorldType::Editor || type == EWorldType::PIE;
-}
-
-bool UOctreeManager::ShouldCreateSubsystem(UObject* Outer) const
-{
-	if (const UWorld* W = Cast<UWorld>(Outer))
-	{
-		const auto WT = W->WorldType;
-		return WT == EWorldType::Game || WT == EWorldType::PIE  || WT == EWorldType::Editor;
-	}
-	return false;
 }

@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
-#include "ChunkProviderSettings.generated.h"
+#include "DC_ChunkProviderSettings.generated.h"
 
 /**
  * 
@@ -26,6 +26,9 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category = "Debug Drawing", meta = (NoRebuild = "true"))
 	bool draw_debug_chunks;
+
+	UPROPERTY(Config, EditAnywhere, meta = (EditCondition = "draw_debug_chunks", EditConditionHides, NoRebuild = "true"), Category = "Debug Drawing")
+	int32 chunk_draw_max_dist;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Debug Drawing", meta = (NoRebuild = "true"))
 	bool draw_dc_data;

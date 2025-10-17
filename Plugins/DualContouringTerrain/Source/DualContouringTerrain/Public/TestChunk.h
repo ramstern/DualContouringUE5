@@ -83,7 +83,7 @@ protected:
 
 	UGameInstance* game_instance = nullptr;
 	UNoiseDataGenerator* gen = nullptr;
-	UE::Tasks::TTask<TArray<float>> noise_gen_task;
+	TArray<float> noise_data;
 	URealtimeMeshComponent* mesh_component = nullptr;
 	URealtimeMeshSimple* mesh = nullptr;
 

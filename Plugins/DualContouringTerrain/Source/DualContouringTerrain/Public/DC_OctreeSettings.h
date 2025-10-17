@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
-#include "OctreeSettings.generated.h"
+#include "DC_OctreeSettings.generated.h"
 
 UENUM()
 enum class EOctreeDebugDrawMode
@@ -19,6 +19,9 @@ class DUALCONTOURINGTERRAIN_API UOctreeSettings : public UDeveloperSettings
 	GENERATED_BODY()
 public:
 	UOctreeSettings();
+
+	UPROPERTY(Config, EditAnywhere)
+	int32 noise_seed = 0;
 
 	UPROPERTY(Config, EditAnywhere, meta = (ClampMin = 2, ClampMax = 10))
 	uint32 max_depth = 2;
@@ -68,6 +71,7 @@ private:
 
 struct OctreeSettingsMultithreadContext
 {
+	int32 seed;
 	uint32 max_depth;
 	float iso_surface;
 	bool simplify;

@@ -3,7 +3,7 @@
 
 #include "TestChunk.h"
 
-#include "NoiseDataGenerator.h"
+#include "DC_NoiseDataGenerator.h"
 #include "Kismet/KismetMathLibrary.h"
 
 #include "Math/Matrix.h"
@@ -58,7 +58,7 @@ void ATestChunk::BeginPlay()
 		}
 	}
 
-	noise_gen_task = gen->GetNoiseFromPositions3D(x_positions.GetData(), y_positions.GetData(), z_positions.GetData(), p_count);
+	noise_data = gen->GetNoiseFromPositions3D_NonThreaded(x_positions.GetData(), y_positions.GetData(), z_positions.GetData(), p_count, 0);
 	mesh = mesh_component->InitializeRealtimeMesh<URealtimeMeshSimple>();
 
 	voxel_datas.Reserve(voxel_resolution.X * voxel_resolution.Y * voxel_resolution.Z);
@@ -253,7 +253,7 @@ void ATestChunk::DualContour(TArray<float>& densities)
 					mass_point += intersection;
 
 					//at 32 vox size, i dont think it's worth doing better zero crossing
-					float alpha_density = gen->GetNoiseSingle3D(intersection.X * scale_fac, intersection.Y * scale_fac, intersection.Z * scale_fac) - iso_surface;
+					float alpha_density = gen->GetNoiseSingle3D(intersection.X * scale_fac, intersection.Y * scale_fac, intersection.Z * scale_fac, 0) - iso_surface;
 
 					FVector3f normal = FDMGetNormal(intersection * scale_fac);
 					vert_normal += normal;
@@ -338,7 +338,7 @@ FVector3f ATestChunk::FDMGetNormal(FVector3f at_point)
 	float y_positions[6] = { at_point.Y,  at_point.Y, at_point.Y + fdm_normal_offset, at_point.Y - fdm_normal_offset, at_point.Y, at_point.Y };
 	float z_positions[6] = { at_point.Z,  at_point.Z, at_point.Z, at_point.Z, at_point.Z + fdm_normal_offset, at_point.Z - fdm_normal_offset };
 
-	TArray<float> noise = gen->GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 6);
+	TArray<float> noise = gen->GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 6, 0);
 
 	FVector3f normal = FVector3f(noise[0] - noise[1], noise[2] - noise[3], noise[4] - noise[5]);
 
@@ -349,14 +349,9 @@ FVector3f ATestChunk::FDMGetNormal(FVector3f at_point)
 void ATestChunk::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	
-	if(noise_gen_task.IsCompleted())
-	{
-		TArray<float>& result = noise_gen_task.GetResult();
 		//DrawNoiseDensities(result);
 
-		DualContour(result);
-		if(draw_debug) DrawVertices();
-	}
+	DualContour(noise_data);
+	if(draw_debug) DrawVertices();
 }
 

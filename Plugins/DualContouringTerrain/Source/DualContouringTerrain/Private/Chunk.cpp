@@ -36,7 +36,7 @@ Chunk& Chunk::operator=(Chunk&& other) noexcept
 	return *this;
 }
 
-ChunkCreationResult::ChunkCreationResult(ChunkCreationResult&& other) noexcept : chunk_idx(other.chunk_idx), created_root(other.created_root)
+ChunkCreationResult::ChunkCreationResult(ChunkCreationResult&& other) noexcept : chunk_idx(other.chunk_idx), newly_created(other.newly_created), created_root(other.created_root)
 {
 	other.created_root = nullptr;
 }
@@ -46,6 +46,7 @@ ChunkCreationResult& ChunkCreationResult::operator=(ChunkCreationResult&& other)
 	if(this != &other)
 	{
 		chunk_idx = other.chunk_idx;
+		newly_created = other.newly_created;
 
 		delete created_root;
 		created_root = other.created_root;

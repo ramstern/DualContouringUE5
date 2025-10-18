@@ -11,6 +11,7 @@
 struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {
 	int32 chunk_idx = -1;
+	bool newly_created = false;
 	OctreeNode* created_root = nullptr;
 
 	ChunkCreationResult() = default;
@@ -57,6 +58,6 @@ public:
 	FVector3f center;
 	FRealtimeMeshSectionGroupKey mesh_group_key;
 	URealtimeMeshSimple* mesh = nullptr;
-	bool has_group_key = false;
+	bool newly_created = false;
 };
 

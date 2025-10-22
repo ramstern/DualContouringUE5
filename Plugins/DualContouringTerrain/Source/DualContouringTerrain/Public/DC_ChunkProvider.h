@@ -30,29 +30,25 @@ private:
 	void ReloadChunks();
 	void ReloadReallocChunks();
 
+	//alloc funcs
+	void Init(bool simulating);
+	void Cleanup(bool simulating);
+
 	struct ChunkGrid
 	{
 	public:
-		FORCEINLINE int32 WrapCoord(int32 coord) const
-		{
-			coord %= dim;
-			if(coord < 0) coord += dim;
-
-			return coord;
-		}
-
-		int32 GetStableChunkIndex(FIntVector3 c) const;
-
-		Chunk* TryGetChunk(FIntVector3 c);
+		Chunk* TryGet(FIntVector3 c);
+		const Chunk& Get(FIntVector3 c);
+		Chunk& GetMutable(FIntVector3 c);
 
 		void Realloc(int32 new_load_distance);
 
-		TArray<Chunk> chunks;
+		TMap<FIntVector3, Chunk> chunks;
 		TQueue<TFunction<ChunkCreationResult()>> chunk_creation_jobs;
 		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
 		TQueue<TTuple<FIntVector3, bool>> chunk_polygonize_jobs;
 		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
-		TArray<TFuture<ERealtimeMeshProxyUpdateStatus>> chunk_section_tasks;
+		//TArray<TFuture<ERealtimeMeshProxyUpdateStatus>> chunk_section_tasks;
 		int32 dim;
 		FIntVector min_coord;
 
@@ -72,8 +68,8 @@ private:
 	const UChunkProviderSettings* chunk_settings = nullptr;
 	UOctreeCode* octree_manager = nullptr;
 
-	void InitializeChunks(FIntVector3 current_chunk_coord);
-	void BuildSlab(FIntVector3 delta, FIntVector3 current_chunk_coord);
+	void BuildChunkArea(FIntVector3 current_chunk_coord);
+	void BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coord);
 
 	//calls upon octree manager to mesh this chunk.
 	void MeshChunk(const FIntVector3& coords, bool negative_delta);
@@ -92,7 +88,6 @@ private:
 	
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
-	URealtimeMeshSimple* octree_mesh = nullptr;
 
 	virtual void Tick(float DeltaTime) override;
 	TStatId GetStatId() const override;

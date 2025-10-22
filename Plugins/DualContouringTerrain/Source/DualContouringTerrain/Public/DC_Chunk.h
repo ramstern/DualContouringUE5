@@ -10,32 +10,19 @@
 
 struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {
-	int32 chunk_idx = -1;
+	FIntVector3 chunk_coord;
 	bool newly_created = false;
 	OctreeNode* created_root = nullptr;
 
 	ChunkCreationResult() = default;
-
-	ChunkCreationResult(const ChunkCreationResult&) = delete;
-	ChunkCreationResult& operator=(const ChunkCreationResult&) = delete;
-
-	ChunkCreationResult(ChunkCreationResult&& other) noexcept;
-	ChunkCreationResult& operator=(ChunkCreationResult&& other) noexcept;
 };
 
 struct DUALCONTOURINGTERRAIN_API ChunkPolygonizeResult
 {
-	int32 chunk_idx = -1;
-	FRealtimeMeshSectionGroupKey created_mesh_key;
-	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
+	TFuture<ERealtimeMeshProxyUpdateStatus> mesh_future;
+	TFuture<ERealtimeMeshProxyUpdateStatus> collision_future;
 
 	ChunkPolygonizeResult() = default;
-
-	ChunkPolygonizeResult(const ChunkPolygonizeResult&) = delete;
-	ChunkPolygonizeResult& operator=(const ChunkPolygonizeResult&) = delete;
-
-	ChunkPolygonizeResult(ChunkPolygonizeResult&& other) noexcept;
-	ChunkPolygonizeResult& operator=(ChunkPolygonizeResult&& other) noexcept;
 };
 
 class URealtimeMeshSimple;
@@ -53,11 +40,10 @@ public:
 
 	Chunk& operator=(Chunk&& other) noexcept;
 
-	struct OctreeNode* root = nullptr;
-	FIntVector3 coordinates;
+	TUniquePtr<struct OctreeNode> root = nullptr;
 	FVector3f center;
+	bool newly_created = false;
 	FRealtimeMeshSectionGroupKey mesh_group_key;
 	URealtimeMeshSimple* mesh = nullptr;
-	bool newly_created = false;
 };
 

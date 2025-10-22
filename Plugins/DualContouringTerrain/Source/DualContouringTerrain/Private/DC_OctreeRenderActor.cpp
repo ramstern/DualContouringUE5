@@ -33,13 +33,19 @@ bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh)
 
 		rmcs.Add(rmc);
 
-		AddOwnedComponent(rmc);
+		AddInstanceComponent(rmc);
 
 		rmc->ClearFlags(RF_Transactional);
 		rmc->SetMobility(EComponentMobility::Stationary);
 		rmc->bCastShadowAsTwoSided = true;
+		rmc->SetCollisionEnabled(ECollisionEnabled::Type::QueryOnly);
+		rmc->SetCollisionObjectType(ECollisionChannel::ECC_WorldStatic);
+		rmc->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+		rmc->SetCanEverAffectNavigation(false);
 
 		out_mesh = rmc->InitializeRealtimeMesh<URealtimeMeshSimple>();
+		FRealtimeMeshCollisionConfiguration config = FRealtimeMeshCollisionConfiguration();
+		out_mesh->SetCollisionConfig(config);
 
 		out_mesh->ClearFlags(RF_Transactional);
 		out_mesh->SetFlags(RF_Transient);
@@ -68,7 +74,7 @@ void ADC_OctreeRenderActor::DestroyAllRMCs()
 	for (int32 i = 0; i < rmcs.Num(); i++)
 	{
 		rmcs[i]->GetRealtimeMeshAs<URealtimeMeshSimple>()->Reset();
-		RemoveOwnedComponent(rmcs[i]);
+		RemoveInstanceComponent(rmcs[i]);
 		rmcs[i]->DestroyComponent();
 	}
 	rmcs.Empty();

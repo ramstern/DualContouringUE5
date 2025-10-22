@@ -374,7 +374,7 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 	return root;
 }
 
-RealtimeMesh::FRealtimeMeshStreamSet UOctreeCode::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta, int32 chunk_idx)
+RealtimeMesh::FRealtimeMeshStreamSet UOctreeCode::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta)
 {
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
 	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);

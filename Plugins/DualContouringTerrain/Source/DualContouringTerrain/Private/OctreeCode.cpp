@@ -392,6 +392,30 @@ RealtimeMesh::FRealtimeMeshStreamSet UOctreeCode::PolygonizeOctree(const TArray<
 	return stream_set;
 }
 
+RealtimeMesh::FRealtimeMeshStreamSet UOctreeCode::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, const TArray<OctreeNode*, TInlineAllocator<8>>& ec_nodes, bool negative_delta)
+{
+	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
+	RealtimeMesh::TRealtimeMeshBuilderLocal<uint32, FPackedNormal, FVector2DHalf, 1> builder(stream_set);
+	builder.EnableTangents();
+
+	BuildMeshData(nodes[main_node[negative_delta]], builder);
+	DC_ProcessCell(nodes[main_node[negative_delta]], builder);
+
+	StitchOctreeNode* stitch = ConstructSeamOctree(nodes, negative_delta, builder);
+
+	DC_ProcessCell(stitch, builder);
+
+	delete stitch;
+
+	StitchOctreeNode* ec_stitch = ConstructSeamOctree(ec_nodes, !negative_delta, builder);
+
+	DC_ProcessCell(ec_stitch, builder);
+
+	delete ec_stitch;
+
+	return stream_set;
+}
+
 bool UOctreeCode::SimplifyOctree(OctreeNode* node, float simplify_threshold)
 {
 	if(!node) return false;

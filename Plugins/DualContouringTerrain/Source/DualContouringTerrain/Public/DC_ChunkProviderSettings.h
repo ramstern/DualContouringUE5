@@ -18,6 +18,9 @@ public:
 	UPROPERTY(Config, EditAnywhere)
 	int32 chunk_load_distance;
 
+	UPROPERTY(Config, EditAnywhere, meta = (NoRebuild = "true"))
+	int32 chunk_ping_deletion_at = 3;
+
 	UPROPERTY(Config, EditAnywhere)
 	int32 chunk_size;
 

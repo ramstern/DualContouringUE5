@@ -41,17 +41,26 @@ private:
 		const Chunk& Get(FIntVector3 c);
 		Chunk& GetMutable(FIntVector3 c);
 
+		//waits until everything is finished and cleans up chunk resources
+		void Cleanup();
+
 		void Realloc(int32 new_load_distance);
+
+		enum PolygonizeTaskArg : uint8
+		{
+			Area = 0,
+			SlabNegative = 1,
+			SlabPositive = 2
+		};
 
 		TMap<FIntVector3, Chunk> chunks;
 		TQueue<TFunction<ChunkCreationResult()>> chunk_creation_jobs;
 		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
-		TQueue<TTuple<FIntVector3, bool>> chunk_polygonize_jobs;
+		TQueue<TTuple<FIntVector3, PolygonizeTaskArg>> chunk_polygonize_jobs;
 		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
-		//TArray<TFuture<ERealtimeMeshProxyUpdateStatus>> chunk_section_tasks;
 		int32 dim;
 		FIntVector min_coord;
-
+		FIntVector3 current_generator_pos;
 	private:
 		FORCEINLINE int32 Flatten(int32 x, int32 y, int32 z) const
 		{
@@ -69,10 +78,11 @@ private:
 	UOctreeCode* octree_manager = nullptr;
 
 	void BuildChunkArea(FIntVector3 current_chunk_coord);
+	TArray<FIntVector3> GetChunkArea(FIntVector3 around);
 	void BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coord);
 
 	//calls upon octree manager to mesh this chunk.
-	void MeshChunk(const FIntVector3& coords, bool negative_delta);
+	void MeshChunk(const FIntVector3& coords, ChunkGrid::PolygonizeTaskArg task_arg);
 
 	void CreateChunk(FIntVector3 coord);
 
@@ -84,10 +94,12 @@ private:
 	FVector GetActiveCameraLocation();
 
 	FVector camera_pos = FVector();
-	FIntVector3 last_chunk_coord = FIntVector3(-1000, -1000, -1000);
-	
+
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
+	AActor* test_follow_actor = nullptr;
+	bool build_initial_area = false;
+	TSet<FIntVector3> temp_created_chunks;
 
 	virtual void Tick(float DeltaTime) override;
 	TStatId GetStatId() const override;

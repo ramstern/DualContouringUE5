@@ -38,6 +38,7 @@ public:
 
 	//input: specific ordering of the main node and all its neighbor nodes
 	static RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta);
+	static RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, const TArray<OctreeNode*, TInlineAllocator<8>>& ec_nodes, bool negative_delta);
 
 	//debug draw octree node
 	void DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);

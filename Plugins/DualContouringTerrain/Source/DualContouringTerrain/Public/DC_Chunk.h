@@ -43,7 +43,7 @@ public:
 	TUniquePtr<struct OctreeNode> root = nullptr;
 	FVector3f center;
 	bool newly_created = false;
-	FRealtimeMeshSectionGroupKey mesh_group_key;
+	uint8 ping_counter = 0;
 	URealtimeMeshSimple* mesh = nullptr;
 };
 

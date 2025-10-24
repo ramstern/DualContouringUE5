@@ -71,35 +71,18 @@ void UChunkProvider::Init(bool simulating)
 		render_actor = created_render_actor;
 	}
 
+	Params.Name = TEXT("TerrainFollowTest");
+	test_follow_actor = GetWorld()->SpawnActor<AActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	test_follow_actor->SetRootComponent( NewObject<USceneComponent>(test_follow_actor) );
 	ReloadReallocChunks();
 }
 void UChunkProvider::Cleanup(bool simulating)
 {
 	UE_LOG(LogTemp, Display, TEXT(" CLEANUP called on: %i"), GetWorld()->WorldType.GetIntValue());
 
-	chunk_grid.chunk_creation_jobs.Empty();
-	//for (int32 i = 0; i < chunk_grid.chunk_creation_tasks.Num(); i++)
-	//{
-	//	auto& future = chunk_grid.chunk_creation_tasks[i];
-	//	auto result = future.Consume();
-	///*	OctreeNode* possible_root = result.created_root;
-	//	if(possible_root)
-	//	{
-	//		delete possible_root;
-	//		possible_root = nullptr;
-	//	}*/
-	//}
-	chunk_grid.chunk_creation_tasks.Empty();
+	chunk_grid.Cleanup();
 
-	chunk_grid.chunk_polygonize_jobs.Empty();
-	/*for (int32 i = 0; i < chunk_grid.chunk_polygonize_tasks.Num(); i++)
-	{
-		auto& future = chunk_grid.chunk_polygonize_tasks[i];
-		future.Consume();
-	}*/
-	chunk_grid.chunk_polygonize_tasks.Empty();
-
-	chunk_grid.chunks.Empty();
+	FlushRenderingCommands();
 
 	render_actor->Destroy();
 	render_actor = nullptr;
@@ -124,26 +107,46 @@ void UChunkProvider::Deinitialize()
 
 void UChunkProvider::ReloadChunks()
 {
+	chunk_grid.Cleanup();
+
+	render_actor->DestroyAllRMCs();
+
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
-
-	last_chunk_coord.X += 100;
+	
+	build_initial_area = true;
 }
 
 void UChunkProvider::ReloadReallocChunks()
 {
-	if (!IsSafeToModifyChunks()) return;
+	chunk_grid.Cleanup();
+
+	render_actor->DestroyAllRMCs();
 
 	chunk_grid.Realloc(chunk_settings->chunk_load_distance);
 
 	FVector cam_pos = GetActiveCameraLocation();
 	FIntVector current_chunk_coord = GetChunkCoordinatesFromPosition(FVector3f(cam_pos));
-
-	last_chunk_coord.X += 100;
+	
+	build_initial_area = true;
 }
 
-
 void UChunkProvider::BuildChunkArea(FIntVector3 current_chunk_coord)
+{
+	TArray<FIntVector3> chunk_coords = GetChunkArea(current_chunk_coord);
+
+	for (int32 i = 0; i < chunk_coords.Num(); i++)
+	{
+		FIntVector3 world_coord = chunk_coords[i];
+
+		if(chunk_grid.chunks.Contains(world_coord)) continue;
+
+		CreateChunk(world_coord);
+		MeshChunk(world_coord, ChunkGrid::PolygonizeTaskArg::Area);
+	}
+}
+
+TArray<FIntVector3> UChunkProvider::GetChunkArea(FIntVector3 around)
 {
 	TArray<FIntVector3> local_chunk_indices;
 	float size = chunk_settings->chunk_size;
@@ -156,11 +159,13 @@ void UChunkProvider::BuildChunkArea(FIntVector3 current_chunk_coord)
 		{
 			for (int32 z = -load_dist; z < load_dist+1; z++)
 			{
+				//if(x*x + y*y + z*z > load_dist*load_dist) continue;
+
 				local_chunk_indices.Add(FIntVector3(x, y, z));
 			}
 		}
 	}
-
+	
 	local_chunk_indices.Sort([](const FIntVector3& a, const FIntVector3& b)
 	{
 		int64 dist_a = static_cast<int64>(a.X) * a.X + static_cast<int64>(a.Y) * a.Y + static_cast<int64>(a.Z) * a.Z;
@@ -169,22 +174,19 @@ void UChunkProvider::BuildChunkArea(FIntVector3 current_chunk_coord)
 		return dist_a < dist_b;
 	});
 
-	for (int32 i = 0; i < local_chunk_indices.Num(); i++)
+	for (auto& c : local_chunk_indices)
 	{
-		FIntVector3 world_coord = current_chunk_coord + local_chunk_indices[i];
-
-		if(chunk_grid.chunks.Contains(world_coord)) continue;
-
-		CreateChunk(world_coord);
-		MeshChunk(world_coord, true);
+		c += around; 
 	}
+
+	return local_chunk_indices;
 }
 
 void UChunkProvider::BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coord)
 {
 	int32 load_dist = (chunk_grid.dim-1) / 2;
 
-	TSet<TTuple<FIntVector3, bool>> build_coords;
+	TSet<TTuple<FIntVector3, ChunkGrid::PolygonizeTaskArg>> build_coords;
 	//in most cases, one slab
 	build_coords.Reserve(chunk_grid.dim*chunk_grid.dim);
 
@@ -196,7 +198,7 @@ void UChunkProvider::BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coo
 			for (int32 z = -load_dist; z < load_dist + 1; z++)
 			{
 				FIntVector3 coord = FIntVector3(load_dist * delta.X, y, z) + current_chunk_coord;
-				build_coords.Emplace(MakeTuple(coord, negative));
+				build_coords.Emplace(MakeTuple(coord, negative ? ChunkGrid::PolygonizeTaskArg::SlabNegative : ChunkGrid::PolygonizeTaskArg::SlabPositive));
 			}
 		}
 	}
@@ -208,7 +210,7 @@ void UChunkProvider::BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coo
 			for (int32 z = -load_dist; z < load_dist + 1; z++)
 			{
 				FIntVector3 coord = FIntVector3(x, load_dist * delta.Y, z) + current_chunk_coord;
-				build_coords.Emplace(MakeTuple(coord, negative));
+				build_coords.Emplace(MakeTuple(coord, negative ? ChunkGrid::PolygonizeTaskArg::SlabNegative : ChunkGrid::PolygonizeTaskArg::SlabPositive));
 			}
 		}
 	}
@@ -220,7 +222,7 @@ void UChunkProvider::BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coo
 			for (int32 y = -load_dist; y < load_dist + 1; y++)
 			{
 				FIntVector3 coord = FIntVector3(x, y, load_dist * delta.Z) + current_chunk_coord;
-				build_coords.Emplace(MakeTuple(coord, negative));
+				build_coords.Emplace(MakeTuple(coord, negative ? ChunkGrid::PolygonizeTaskArg::SlabNegative : ChunkGrid::PolygonizeTaskArg::SlabPositive));
 			}
 		}
 	}
@@ -234,10 +236,10 @@ void UChunkProvider::BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coo
 	}
 }
 
-void UChunkProvider::MeshChunk(const FIntVector3& coords, bool negative_delta)
+void UChunkProvider::MeshChunk(const FIntVector3& coords, ChunkGrid::PolygonizeTaskArg task_arg)
 {
 	//return;
-	chunk_grid.chunk_polygonize_jobs.Enqueue(MakeTuple(coords, negative_delta));	
+	chunk_grid.chunk_polygonize_jobs.Enqueue(MakeTuple(coords, task_arg));	
 }
 
 void UChunkProvider::CreateChunk(FIntVector3 coord)
@@ -245,12 +247,6 @@ void UChunkProvider::CreateChunk(FIntVector3 coord)
 	check(!chunk_grid.chunks.Contains(coord));
 
 	float size = chunk_settings->chunk_size;
-
-	/*if(chunk_grid.chunks[coord].mesh)
-	{
-		auto rmc = static_cast<URealtimeMeshComponent*>(chunk_grid.chunks[flat_idx].mesh->GetOuter());
-		render_actor->ReleaseRMC(rmc);
-	}*/
 
 	URealtimeMeshSimple* fetched_mesh;
 	bool newly_created = render_actor->FetchRMComponentMesh(fetched_mesh);
@@ -360,6 +356,8 @@ void UChunkProvider::FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>
 
 FVector UChunkProvider::GetActiveCameraLocation()
 {
+	return test_follow_actor->GetActorLocation();
+
 	#if WITH_EDITOR
 		if (GEditor->IsPlaySessionInProgress())
 		{
@@ -457,6 +455,8 @@ void UChunkProvider::Tick(float DeltaTime)
 			chunk.root = TUniquePtr<OctreeNode>(creation_result.created_root);
 			chunk.newly_created = creation_result.newly_created;
 
+			temp_created_chunks.Add(creation_result.chunk_coord);
+
 			chunk_grid.chunk_creation_tasks.RemoveAt(i);
 			i--;
 		}
@@ -465,36 +465,128 @@ void UChunkProvider::Tick(float DeltaTime)
 	{
 		while(!chunk_grid.chunk_polygonize_jobs.IsEmpty())
 		{
-			TTuple<FIntVector3, bool> tuple;
+			TTuple<FIntVector3, ChunkGrid::PolygonizeTaskArg> tuple;
 			chunk_grid.chunk_polygonize_jobs.Dequeue(tuple);
 
 			const Chunk& chunk = chunk_grid.Get(tuple.Key);
-			bool negative_delta = tuple.Value;
+			FIntVector3 coord = tuple.Key;
+			ChunkGrid::PolygonizeTaskArg task_arg = tuple.Value;
+
+			bool edge_case = false;
+			if(task_arg)
+			{
+				if (task_arg == ChunkGrid::PolygonizeTaskArg::SlabNegative)
+				{
+					Chunk* back;
+					Chunk* down;
+					Chunk* left;
+
+					if(temp_created_chunks.Contains(coord + FIntVector3(-1,0,0)))
+					{
+						back = nullptr;
+					}
+					else 
+					{
+						back = chunk_grid.TryGet(coord + FIntVector3(-1, 0, 0));
+					}
+
+					if (temp_created_chunks.Contains(coord + FIntVector3(0, 0, -1)))
+					{
+						down = nullptr;
+					}
+					else
+					{
+						down = chunk_grid.TryGet(coord + FIntVector3(0, 0, -1));
+					}
+
+					if (temp_created_chunks.Contains(coord + FIntVector3(0, -1, 0)))
+					{
+						left = nullptr;
+					}
+					else
+					{
+						left = chunk_grid.TryGet(coord + FIntVector3(0, -1, 0));
+					}
+
+					edge_case = back || down || left;
+				}
+				else
+				{
+					Chunk* front;
+					Chunk* up;
+					Chunk* right;
+
+					if (temp_created_chunks.Contains(coord + FIntVector3(1, 0, 0)))
+					{
+						front = nullptr;
+					}
+					else
+					{
+						front = chunk_grid.TryGet(coord + FIntVector3(1, 0, 0));
+					}
+
+					if (temp_created_chunks.Contains(coord + FIntVector3(0, 0, 1)))
+					{
+						up = nullptr;
+					}
+					else
+					{
+						up = chunk_grid.TryGet(coord + FIntVector3(0, 0, 1));
+					}
+
+					if (temp_created_chunks.Contains(coord + FIntVector3(0, 1, 0)))
+					{
+						right = nullptr;
+					}
+					else
+					{
+						right = chunk_grid.TryGet(coord + FIntVector3(0, 1, 0));
+					}
+
+					edge_case = front || up || right;
+				}
+			}
+			
+			bool negative_delta = task_arg == ChunkGrid::SlabNegative;
 
 			OctreeNode* root = chunk.root.Get();
 			bool newly_created = chunk.newly_created;
 
 			TArray<OctreeNode*, TInlineAllocator<8>> seam_octants;
 			seam_octants.SetNumUninitialized(8);
-			FillSeamOctreeNodes(seam_octants, negative_delta, tuple.Key, root);
+			FillSeamOctreeNodes(seam_octants, negative_delta, coord, root);
+
+			TArray<OctreeNode*, TInlineAllocator<8>> ec_seam_octants;
+			if(edge_case)
+			{
+				ec_seam_octants.SetNumUninitialized(8);
+				FillSeamOctreeNodes(ec_seam_octants, !negative_delta, coord, root);
+			}
 
 			URealtimeMeshSimple* chunk_mesh = chunk.mesh;
+			//FIntVector3 hash_coord = tuple.Key - current_chunk_coord;
 
 #if USE_MULTITHREADING
 			chunk_grid.chunk_polygonize_tasks.Add(Async(EAsyncExecution::LargeThreadPool,
-			[this, coord = tuple.Key, negative_delta, seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
+			[this, negative_delta, seam_octants, ec_seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
 			{
 				ChunkPolygonizeResult result;
 
-				int32 hash_1 = HashCombineFast(coord.X, coord.Y);
-				int32 hash_2 = HashCombineFast(hash_1, coord.Z);
+				FRealtimeMeshSectionGroupKey mesh_group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
 
-				FRealtimeMeshSectionGroupKey mesh_group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh", hash_2));
 
-				RealtimeMesh::FRealtimeMeshStreamSet stream_set = octree_manager->PolygonizeOctree(seam_octants, negative_delta);
+				RealtimeMesh::FRealtimeMeshStreamSet stream_set;
+
+				if(ec_seam_octants.IsEmpty())
+				{
+					stream_set = octree_manager->PolygonizeOctree(seam_octants, negative_delta);
+				}
+				else 
+				{
+					stream_set = octree_manager->PolygonizeOctree(seam_octants, ec_seam_octants, negative_delta);
+				}
 
 				//create / update mesh section of chunk
-				
 				if(newly_created)
 				{
 					result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
@@ -529,31 +621,64 @@ void UChunkProvider::Tick(float DeltaTime)
 
 	if(IsSafeToModifyChunks())
 	{
-		//if somehow we moved multiple chunks in 1 tick OR we just loaded in, just reinit the chunks
-		if ((current_chunk_coord - last_chunk_coord).GetAbsMax() > 1)
+		temp_created_chunks.Empty();
+
+		bool poll_lifetime = false;
+		if (build_initial_area)
 		{
-#if WITH_EDITOR
-			if(!isPIE)
-			{
-				//CollectGarbage(EObjectFlags::RF_NoFlags);
-			}
-#endif
 			BuildChunkArea(current_chunk_coord);
+			chunk_grid.current_generator_pos = current_chunk_coord;
+
+			build_initial_area = false;
 		}
-		else if (current_chunk_coord != last_chunk_coord)
+		else if(current_chunk_coord != chunk_grid.current_generator_pos)
 		{
-#if WITH_EDITOR
-			if(!isPIE)
-			{
-				//CollectGarbage(EObjectFlags::RF_NoFlags);
-			}
-#endif
-			FIntVector3 delta = current_chunk_coord - last_chunk_coord;
+			FIntVector3 gen_delta = current_chunk_coord - chunk_grid.current_generator_pos;
+			FIntVector3 clamp = FIntVector3(FMath::Clamp(gen_delta.X, -1, 1), FMath::Clamp(gen_delta.Y, -1, 1), FMath::Clamp(gen_delta.Z, -1,1));
+			chunk_grid.current_generator_pos += clamp;
 
-			BuildSlabs(delta, current_chunk_coord);
+			BuildSlabs(clamp, chunk_grid.current_generator_pos);
+
+			poll_lifetime = true;
 		}
 
-		last_chunk_coord = current_chunk_coord;
+		if(poll_lifetime)
+		{
+			//TSparseArray for coordinates that exist with big big worlds..?
+
+			TArray<FIntVector3> poll_chunks = GetChunkArea(chunk_grid.current_generator_pos);
+			for (int32 i = 0; i < poll_chunks.Num(); i++)
+			{
+				if (chunk_grid.chunks.Contains(poll_chunks[i]))
+				{
+					Chunk& chunk = chunk_grid.GetMutable(poll_chunks[i]);
+					chunk.ping_counter = 0;
+				}
+			}
+			
+			//ping lifetime of existing chunks
+			TArray<FIntVector3> cleanup_chunks;
+			for (auto& pair : chunk_grid.chunks)
+			{
+				Chunk& chunk = pair.Value;
+
+				if (chunk.ping_counter >= chunk_settings->chunk_ping_deletion_at)
+				{
+					const Chunk& removed_chunk = chunk_grid.Get(pair.Key);
+
+					auto rmc = static_cast<URealtimeMeshComponent*>(removed_chunk.mesh->GetOuter());
+					render_actor->ReleaseRMC(rmc);
+
+					cleanup_chunks.Add(pair.Key);
+				}
+				else chunk.ping_counter++;
+			}
+			for (int32 i = 0; i < cleanup_chunks.Num(); i++)
+			{
+				chunk_grid.chunks.FindAndRemoveChecked(cleanup_chunks[i]);
+			}
+
+		}
 	}
 }
 
@@ -608,4 +733,33 @@ void UChunkProvider::ChunkGrid::Realloc(int32 new_load_distance)
 
 	chunk_creation_tasks.Reserve(dim * dim * dim);
 	chunk_polygonize_tasks.Reserve(dim * dim * dim);
+}
+
+void UChunkProvider::ChunkGrid::Cleanup()
+{
+	chunk_creation_jobs.Empty();
+	for (int32 i = 0; i < chunk_creation_tasks.Num(); i++)
+	{
+		auto& future = chunk_creation_tasks[i];
+		auto result = future.Consume();
+		OctreeNode* possible_root = result.created_root;
+		if (possible_root)
+		{
+			delete possible_root;
+			possible_root = nullptr;
+		}
+	}
+	chunk_creation_tasks.Empty();
+
+	chunk_polygonize_jobs.Empty();
+	for (int32 i = 0; i < chunk_polygonize_tasks.Num(); i++)
+	{
+		auto& future = chunk_polygonize_tasks[i];
+		auto result = future.Consume();
+		result.mesh_future.Wait();
+		result.collision_future.Wait();
+	}
+	chunk_polygonize_tasks.Empty();
+
+	chunks.Empty();
 }

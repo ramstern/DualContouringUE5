@@ -10,7 +10,8 @@ enum class PolygonizeTaskArg : uint8
 {
 	Area = 0,
 	SlabNegative = 1,
-	SlabPositive = 2
+	SlabPositive = 2,
+	RebuildAllSeams = 3,
 };
 
 enum class CreationTaskArg : uint8

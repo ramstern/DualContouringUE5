@@ -23,7 +23,7 @@ class DUALCONTOURINGTERRAIN_API UChunkProvider : public UTickableWorldSubsystem
 	GENERATED_BODY()
 	
 public:
-	void ModifyOperation(FVector3f position);
+	void ModifyOperation(const SDFOp& sdf_operation);
 
 private:
 	// USubsystem implementation Begin
@@ -98,9 +98,11 @@ private:
 
 	FVector camera_pos = FVector();
 
+	TArray<UE::Math::TBox<float>> ops;
+
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
-	AActor* test_follow_actor = nullptr;
+	//AActor* test_follow_actor = nullptr;
 	bool build_initial_area = false;
 	TSet<FIntVector3> temp_created_chunks;
 

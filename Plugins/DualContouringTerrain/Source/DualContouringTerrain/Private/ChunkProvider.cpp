@@ -73,9 +73,9 @@ void UChunkProvider::Init(bool simulating)
 		render_actor = created_render_actor;
 	}
 
-	Params.Name = TEXT("TerrainFollowTest");
+	/*Params.Name = TEXT("TerrainFollowTest");
 	test_follow_actor = GetWorld()->SpawnActor<AActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
-	test_follow_actor->SetRootComponent( NewObject<USceneComponent>(test_follow_actor) );
+	test_follow_actor->SetRootComponent( NewObject<USceneComponent>(test_follow_actor) );*/
 	ReloadReallocChunks();
 }
 void UChunkProvider::Cleanup(bool simulating)
@@ -89,8 +89,8 @@ void UChunkProvider::Cleanup(bool simulating)
 	render_actor->Destroy();
 	render_actor = nullptr;
 
-	test_follow_actor->Destroy();
-	test_follow_actor = nullptr;
+	/*test_follow_actor->Destroy();
+	test_follow_actor = nullptr;*/
 }
 
 void UChunkProvider::Deinitialize()
@@ -259,7 +259,7 @@ void UChunkProvider::EditNoiseField(TArray<float>& noise, const FVector3f& cente
 			switch (sdf_op.sdf_type)
 			{
 			case SDFOp::SDFType::Box:
-				noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, sdf_op.bounds_size));
+				noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, ((sdf_op.bounds_size*0.5f)*0.01f)));
 				break;
 			case SDFOp::SDFType::Sphere:
 				break;
@@ -342,7 +342,6 @@ void UChunkProvider::CreateChunk(FIntVector3 coord)
 	Chunk chunk;
 	chunk.center = FVector3f(coord.X * size + size * 0.5f, coord.Y * size + size * 0.5f, coord.Z * size + size * 0.5f);
 	chunk.mesh = fetched_mesh;
-
 
 	chunk_grid.chunks.Add(coord, MoveTemp(chunk));
 
@@ -444,7 +443,7 @@ void UChunkProvider::FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>
 
 FVector UChunkProvider::GetActiveCameraLocation()
 {
-	return test_follow_actor->GetActorLocation();
+	//return test_follow_actor->GetActorLocation();
 
 	#if WITH_EDITOR
 		if (GEditor->IsPlaySessionInProgress())
@@ -478,34 +477,58 @@ FVector UChunkProvider::GetActiveCameraLocation()
 	#endif
 }
 
-void UChunkProvider::ModifyOperation(FVector3f position)
+void UChunkProvider::ModifyOperation(const SDFOp& sdf_operation)
 {
 	if(!IsSafeToModifyChunks()) return;
 
-	FIntVector3 coord = GetChunkCoordinatesFromPosition(position);
+	const float inflate_factor = 2.f;
+
+	FIntVector3 coord = GetChunkCoordinatesFromPosition(sdf_operation.position);
 
 	if(!chunk_grid.chunks.Contains(coord)) return;
-
-	Chunk& chunk = chunk_grid.GetMutable(coord);
 	
-	SDFOp box_sdf(position, FVector3f(100.f) * 0.01f);
-	chunk_grid.modify_operations.Enqueue(box_sdf);
+	chunk_grid.modify_operations.Enqueue(sdf_operation);
 
 	float chunk_size = chunk_settings->chunk_size;
 
+	FVector3f op_min = sdf_operation.position - ((sdf_operation.bounds_size * 0.5f) * inflate_factor);
+	FVector3f op_max = sdf_operation.position + ((sdf_operation.bounds_size * 0.5f) * inflate_factor);
 
-
-	FVector3f chunk_min = chunk.center - chunk_size*0.5f;
-	FVector3f chunk_max = chunk.center + chunk_size*0.5f;
-
-	FVector3f op_min = position - FVector3f(100.f) * 0.5f;
-	FVector3f op_max = position + FVector3f(100.f)*0.5f;
-
-	UE::Math::TBox<float> chunk_bb(chunk_min, chunk_max);
 	UE::Math::TBox<float> op_bb(op_min, op_max);
 
+	ops.Add(op_bb);
+
+	bool on_seam = false;
+	for (int32 x = -1; x < 2; x++)
+	{
+		for (int32 y = -1; y < 2; y++)
+		{
+			for (int32 z = -1; z < 2; z++)
+			{
+				FIntVector3 neigbor_coord = coord + FIntVector3(x, y, z);
+
+				if(coord == neigbor_coord) continue;
+
+				if(Chunk* neighbor = chunk_grid.TryGet(neigbor_coord))
+				{
+					FVector3f chunk_min = neighbor->center - chunk_size * 0.5f;
+					FVector3f chunk_max = neighbor->center + chunk_size * 0.5f;
+
+					UE::Math::TBox<float> chunk_bb(chunk_min, chunk_max);
+
+					if(chunk_bb.Intersect(op_bb)) 
+					{
+						on_seam = true;
+						RebuildChunk(neigbor_coord);
+						MeshChunk(neigbor_coord, PolygonizeTaskArg::RebuildAllSeams);
+					}
+				}
+			}
+		}
+	}
+
 	RebuildChunk(coord);
-	MeshChunk(coord, PolygonizeTaskArg::Area);
+	MeshChunk(coord, on_seam ? PolygonizeTaskArg::RebuildAllSeams : PolygonizeTaskArg::Area);
 }
 
 void UChunkProvider::Tick(float DeltaTime)
@@ -536,6 +559,11 @@ void UChunkProvider::Tick(float DeltaTime)
 			DrawDebugBox(GetWorld(), FVector(chunk_center), FVector(static_cast<float>(chunk_settings->chunk_size)*0.5f), FColor::White);
 		}
 		GEditor->AddOnScreenDebugMessage(144, 0.1f, FColor::White, current_chunk_coord.ToString());
+	}
+
+	for (int32 i = 0; i < ops.Num(); i++)
+	{
+		DrawDebugBox(GetWorld(), FVector(ops[i].GetCenter()), FVector(ops[i].GetExtent()), FColor::White);
 	}
 
 	if(chunk_settings->draw_octree) 
@@ -637,7 +665,8 @@ void UChunkProvider::Tick(float DeltaTime)
 			bool edge_case = false;
 			if(task_arg != PolygonizeTaskArg::Area)
 			{
-				if (task_arg == PolygonizeTaskArg::SlabNegative)
+				if(task_arg == PolygonizeTaskArg::RebuildAllSeams) edge_case = true;
+				else if (task_arg == PolygonizeTaskArg::SlabNegative)
 				{
 					Chunk* back;
 					Chunk* down;

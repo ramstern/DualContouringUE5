@@ -5,6 +5,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "DC_ChunkProvider.h"
+#include "DC_SDFOps.h"
 
 void ADCTestPawn::BeginPlay()
 {
@@ -50,6 +51,7 @@ void ADCTestPawn::RaycastOnce()
 	FHitResult hit_result;
 	const bool hit = DoViewRaycast(hit_result);
 
-	if(hit) chunk_provider->ModifyOperation(FVector3f(hit_result.ImpactPoint));
-	//UE_LOG(LogTemp, Display, TEXT("%i"), hit);
+	SDFOp box_sdf(FVector3f(hit_result.ImpactPoint), FVector3f(100.f));
+
+	if(hit) chunk_provider->ModifyOperation(box_sdf);
 }

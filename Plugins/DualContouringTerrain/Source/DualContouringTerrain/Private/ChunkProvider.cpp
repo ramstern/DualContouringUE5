@@ -496,8 +496,6 @@ void UChunkProvider::ModifyOperation(const SDFOp& sdf_operation)
 
 	UE::Math::TBox<float> op_bb(op_min, op_max);
 
-	ops.Add(op_bb);
-
 	bool on_seam = false;
 	for (int32 x = -1; x < 2; x++)
 	{
@@ -519,6 +517,7 @@ void UChunkProvider::ModifyOperation(const SDFOp& sdf_operation)
 					if(chunk_bb.Intersect(op_bb)) 
 					{
 						on_seam = true;
+						chunk_grid.modify_operations.Enqueue(sdf_operation);
 						RebuildChunk(neigbor_coord);
 						MeshChunk(neigbor_coord, PolygonizeTaskArg::RebuildAllSeams);
 					}
@@ -559,11 +558,6 @@ void UChunkProvider::Tick(float DeltaTime)
 			DrawDebugBox(GetWorld(), FVector(chunk_center), FVector(static_cast<float>(chunk_settings->chunk_size)*0.5f), FColor::White);
 		}
 		GEditor->AddOnScreenDebugMessage(144, 0.1f, FColor::White, current_chunk_coord.ToString());
-	}
-
-	for (int32 i = 0; i < ops.Num(); i++)
-	{
-		DrawDebugBox(GetWorld(), FVector(ops[i].GetCenter()), FVector(ops[i].GetExtent()), FColor::White);
 	}
 
 	if(chunk_settings->draw_octree) 

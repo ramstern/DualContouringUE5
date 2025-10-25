@@ -98,7 +98,7 @@ private:
 
 	FVector camera_pos = FVector();
 
-	TArray<UE::Math::TBox<float>> ops;
+	//TArray<UE::Math::TBox<float>> ops;
 
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;

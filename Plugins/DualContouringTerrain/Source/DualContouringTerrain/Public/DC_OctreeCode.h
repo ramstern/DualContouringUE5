@@ -35,8 +35,8 @@ public:
 	virtual void Deinitialize() override;
 	
 	// builds an octree and returns it
-	static OctreeNode* BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context);
-	static OctreeNode* RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, SDFOp sdf_operation);
+	static OctreeNode* BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise);
+	static OctreeNode* RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const SDFOp& sdf_op);
 	
 	//get octree node from position p inside starting (parent) node, at depth depth.
 	TUniquePtr<OctreeNode>* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth) const;
@@ -44,6 +44,12 @@ public:
 	//input: specific ordering of the main node and all its neighbor nodes
 	static RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta);
 	static RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, const TArray<OctreeNode*, TInlineAllocator<8>>& ec_nodes, bool negative_delta);
+
+	static FORCEINLINE int32 GetDim(int32 depth) { return 1 << depth;};
+	static FORCEINLINE int32 Get1DIndexFrom3D(int32 x, int32 y, int32 z, int32 dim)
+	{
+		return z + (y * dim) + (x * dim * dim);
+	}
 
 	//debug draw octree node
 	void DebugDrawOctree(UWorld* world, OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);
@@ -77,7 +83,6 @@ private:
 	//returns the root stitch node copy of start_node
 	//StitchOctreeNode* ConstructSeamOctree(OctreeNode* start_node, uint8 node_idx, OctreeNode* parent_node, MeshBuilder& builder);
 
-	static FORCEINLINE int32 GetDim(int32 depth) { return 1 << depth;};
 
 	
 	//debug draw dc data
@@ -101,10 +106,6 @@ private:
 	}
 
 
-	static FORCEINLINE int32 Get1DIndexFrom3D(int32 x, int32 y, int32 z, int32 dim)
-	{
-		return z + (y * dim) + (x * dim * dim);
-	}
 
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;

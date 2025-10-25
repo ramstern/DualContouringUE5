@@ -49,20 +49,6 @@ private:
 
 		void Realloc(int32 new_load_distance);
 
-		enum class PolygonizeTaskArg : uint8
-		{
-			Area = 0,
-			SlabNegative = 1,
-			SlabPositive = 2
-		};
-
-		enum class CreationTaskArg : uint8
-		{
-			None = 0,
-			NewlyCreated = 1,
-			ModifyOperation = 2 
-		};
-
 		TMap<FIntVector3, Chunk> chunks;
 
 		TQueue<TTuple<FIntVector3, CreationTaskArg>> chunk_creation_jobs;
@@ -92,12 +78,14 @@ private:
 	UOctreeCode* octree_manager = nullptr;
 
 	void BuildChunkArea(FIntVector3 current_chunk_coord);
-	TArray<FIntVector3> GetChunkArea(FIntVector3 around);
 	void BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coord);
+	TArray<FIntVector3> GetChunkArea(FIntVector3 around);
+
+	TArray<float> BuildNoiseField(const FVector3f& center, float size, int32 max_depth, int32 noise_seed);
+	void EditNoiseField(TArray<float>& noise_field, const FVector3f& center, float size, int32 max_depth, const SDFOp& sdf_op);
 
 	//calls upon octree manager to mesh this chunk.
-	void MeshChunk(const FIntVector3& coords, ChunkGrid::PolygonizeTaskArg task_arg);
-
+	void MeshChunk(const FIntVector3& coords, PolygonizeTaskArg task_arg);
 	void CreateChunk(FIntVector3 coord);
 	void RebuildChunk(FIntVector3 coord);
 
@@ -109,7 +97,6 @@ private:
 	FVector GetActiveCameraLocation();
 
 	FVector camera_pos = FVector();
-
 
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;

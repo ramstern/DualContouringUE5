@@ -261,7 +261,7 @@ StitchOctreeNode* UOctreeCode::ConstructSeamOctree(const TArray<OctreeNode*, TIn
 //};
 
 
-OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context)
+OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
@@ -274,36 +274,8 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 
 	int32 dim = GetDim(settings_context.max_depth)+1;
 
-	TArray<float> x_pos, y_pos, z_pos;
-	x_pos.SetNumUninitialized(dim * dim * dim);
-	y_pos.SetNumUninitialized(dim * dim * dim);
-	z_pos.SetNumUninitialized(dim * dim * dim);
-
-	FVector3f min = center - size*0.5f;
-	float vox_size = size / (dim-1);
-
-	for (size_t x = 0; x < dim; x++)
-	{
-		for (size_t y = 0; y < dim; y++)
-		{
-			for (size_t z = 0; z < dim; z++)
-			{
-				int32 idx = Get1DIndexFrom3D(x,y,z, dim);
-				x_pos[idx] = (min.X + vox_size * x) * 0.01f;
-				y_pos[idx] = (min.Y + vox_size * y) * 0.01f;
-				z_pos[idx] = (min.Z + vox_size * z) * 0.01f;
-			}
-		}
-	}
-
-	TArray<float> noise;
-	{
-#if USE_NAMED_STATS
-		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_NoisePoll)
-#endif
-		noise = UNoiseDataGenerator::GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim*dim*dim, settings_context.seed);
-	}
 	int32 vox_dim = dim-1;
+	float vox_size = size / vox_dim;
 
 	const float iso_surface = settings_context.iso_surface;
 
@@ -365,65 +337,22 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 	return root;
 }
 
-OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, SDFOp sdf_operation)
+OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const SDFOp& sdf_op)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
 #endif
 
-		OctreeNode* root = new OctreeNode();
+	//possible replace with uniqueptr
+	OctreeNode* root = new OctreeNode();
 	root->center = center;
 	root->depth = 0;
 	root->size = size;
 
 	int32 dim = GetDim(settings_context.max_depth) + 1;
 
-	TArray<float> x_pos, y_pos, z_pos;
-	x_pos.SetNumUninitialized(dim * dim * dim);
-	y_pos.SetNumUninitialized(dim * dim * dim);
-	z_pos.SetNumUninitialized(dim * dim * dim);
-
-	FVector3f min = center - size * 0.5f;
-	float vox_size = size / (dim - 1);
-
-	for (int32 x = 0; x < dim; x++)
-	{
-		for (int32 y = 0; y < dim; y++)
-		{
-			for (int32 z = 0; z < dim; z++)
-			{
-				int32 idx = Get1DIndexFrom3D(x, y, z, dim);
-				x_pos[idx] = (min.X + vox_size * x) * 0.01f;
-				y_pos[idx] = (min.Y + vox_size * y) * 0.01f;
-				z_pos[idx] = (min.Z + vox_size * z) * 0.01f;
-			}
-		}
-	}
-
-	TArray<float> noise;
-	{
-#if USE_NAMED_STATS
-		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_NoisePoll)
-#endif
-			noise = UNoiseDataGenerator::GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim * dim * dim, settings_context.seed);
-
-		for (int32 i = 0; i < dim*dim*dim; i++)
-		{
-			FVector3f point_pos = FVector3f(x_pos[i], y_pos[i], z_pos[i]);
-			
-			FVector3f local_pos = point_pos - (sdf_operation.position * 0.01f);
-
-			switch(sdf_operation.type)
-			{
-			case SDF::Type::Box:
-				noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, sdf_operation.size*0.01f));
-				break;
-			}
-		}
-	}
-
-
 	int32 vox_dim = dim - 1;
+	float vox_size = size / vox_dim;
 
 	const float iso_surface = settings_context.iso_surface;
 

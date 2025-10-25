@@ -6,11 +6,26 @@
 #include "DC_OctreeNode.h"
 #include "Interface/Core/RealtimeMeshInterfaceFwd.h"
 
+enum class PolygonizeTaskArg : uint8
+{
+	Area = 0,
+	SlabNegative = 1,
+	SlabPositive = 2
+};
+
+enum class CreationTaskArg : uint8
+{
+	None = 0,
+	NewlyCreated = 1,
+	ModifyOperation = 2
+};
+
 struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {
 	FIntVector3 chunk_coord;
-	bool newly_created = false;
+	CreationTaskArg task_arg = CreationTaskArg::None;
 	OctreeNode* created_root = nullptr;
+	TArray<float> noise_field;
 
 	ChunkCreationResult() = default;
 };
@@ -43,5 +58,6 @@ public:
 	bool newly_created = false;
 	uint8 ping_counter = 0;
 	URealtimeMeshSimple* mesh = nullptr;
+	TArray<float> noise_field;
 };
 

@@ -4,23 +4,28 @@
 
 #include "CoreMinimal.h"
 
-/**
- * 
- */
 class DUALCONTOURINGTERRAIN_API SDF
 {
 public:
-	enum class Type : uint8
-	{
-		Box = 1
-	};
-
-	static float Box(FVector3f p, FVector3f extent);
+	static float Box(const FVector3f& p, const FVector3f& extent);
 };
-
 struct DUALCONTOURINGTERRAIN_API SDFOp
 {
-	SDF::Type type;
+	SDFOp(const FVector3f& pos, const FVector3f& _bounds_size) : position(pos), bounds_size(_bounds_size){}
+	SDFOp() = default;
+
 	FVector3f position;
-	FVector3f size;
+	FVector3f bounds_size;
+
+	enum ModType : uint8
+	{
+		Union,
+		Subtract
+	} mod_type = ModType::Subtract;
+	enum SDFType : uint8
+	{
+		Box,
+		Sphere
+	} sdf_type = SDFType::Box;
 };
+

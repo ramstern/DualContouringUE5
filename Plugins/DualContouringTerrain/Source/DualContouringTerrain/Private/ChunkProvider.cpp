@@ -25,13 +25,18 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 	UChunkProviderSettings::OnChanged().AddUObject(this, &UChunkProvider::ReloadReallocChunks);
 
 #if WITH_EDITOR
-
 	if(GetWorld()->WorldType == EWorldType::Editor)
 	{
 		FEditorDelegates::BeginPIE.AddUObject(this, &UChunkProvider::Cleanup);
 		FEditorDelegates::EndPIE.AddUObject(this, &UChunkProvider::Init);
 	}
-#endif 
+#endif
+
+	chunk_settings = GetDefault<UChunkProviderSettings>();
+	octree_manager = GEngine->GetEngineSubsystem<UOctreeCode>();
+
+	chunk_settings->terrain_material.LoadSynchronous();
+
 	Init(false);
 }
 
@@ -40,8 +45,6 @@ void UChunkProvider::Init(bool simulating)
 	UE_LOG(LogTemp, Display, TEXT(" INIT called on: %i"), GetWorld()->WorldType.GetIntValue());
 
 	//Collection.InitializeDependency(UAOctreeCode::StaticClass());
-	chunk_settings = GetDefault<UChunkProviderSettings>();
-	octree_manager = GEngine->GetEngineSubsystem<UOctreeCode>();
 
 	FActorSpawnParameters Params;
 	Params.Name = TEXT("DC_OctreeRenderActor");
@@ -86,6 +89,9 @@ void UChunkProvider::Cleanup(bool simulating)
 
 	render_actor->Destroy();
 	render_actor = nullptr;
+
+	test_follow_actor->Destroy();
+	test_follow_actor = nullptr;
 }
 
 void UChunkProvider::Deinitialize()
@@ -238,40 +244,37 @@ void UChunkProvider::BuildSlabs(FIntVector3 delta, FIntVector3 current_chunk_coo
 
 void UChunkProvider::MeshChunk(const FIntVector3& coords, ChunkGrid::PolygonizeTaskArg task_arg)
 {
-	//return;
 	chunk_grid.chunk_polygonize_jobs.Enqueue(MakeTuple(coords, task_arg));	
 }
 
 void UChunkProvider::CreateChunk(FIntVector3 coord)
 {
-	check(!chunk_grid.chunks.Contains(coord));
-
-	float size = chunk_settings->chunk_size;
+	checkSlow(!chunk_grid.chunks.Contains(coord));
 
 	URealtimeMeshSimple* fetched_mesh;
-	bool newly_created = render_actor->FetchRMComponentMesh(fetched_mesh);
+	bool newly_created = render_actor->FetchRMComponentMesh(fetched_mesh, chunk_settings->terrain_material.Get());
+
+	float size = chunk_settings->chunk_size;
 
 	Chunk chunk;
 	chunk.center = FVector3f(coord.X * size + size * 0.5f, coord.Y * size + size * 0.5f, coord.Z * size + size * 0.5f);
 	chunk.mesh = fetched_mesh;
-
-	FVector3f chunk_center = chunk.center;
-
-	OctreeSettingsMultithreadContext settings_context;
-	settings_context = *GetDefault<UOctreeSettings>();
-
-	chunk_grid.chunk_creation_jobs.Enqueue(
-	[this, coord,chunk_center, size, settings_context, newly_created]() -> ChunkCreationResult
-	{
-		ChunkCreationResult result;
-		result.chunk_coord = coord;
-		result.created_root = octree_manager->BuildOctree(chunk_center, size, settings_context);
-		result.newly_created = newly_created;
-
-		return result;
-	});
-
 	chunk_grid.chunks.Add(coord, MoveTemp(chunk));
+
+	ChunkGrid::CreationTaskArg task_arg = newly_created ? ChunkGrid::CreationTaskArg::NewlyCreated : ChunkGrid::CreationTaskArg::None;
+
+	//building octree job
+	chunk_grid.chunk_creation_jobs.Enqueue(MakeTuple(coord, task_arg));
+}
+
+void UChunkProvider::RebuildChunk(FIntVector3 coord)
+{
+	checkSlow(chunk_grid.chunks.Contains(coord));
+
+	Chunk& chunk = chunk_grid.GetMutable(coord);
+	chunk.root.Reset();
+
+	chunk_grid.chunk_creation_jobs.Enqueue(MakeTuple(coord, ChunkGrid::CreationTaskArg::ModifyOperation));
 }
 
 bool UChunkProvider::IsSafeToModifyChunks()
@@ -390,6 +393,30 @@ FVector UChunkProvider::GetActiveCameraLocation()
 	#endif
 }
 
+void UChunkProvider::ModifyOperation(FVector3f position)
+{
+	if(!IsSafeToModifyChunks()) return;
+
+	FIntVector3 coord = GetChunkCoordinatesFromPosition(position);
+
+	if(!chunk_grid.chunks.Contains(coord)) return;
+
+	Chunk& chunk = chunk_grid.GetMutable(coord);
+	
+	RebuildChunk(coord);
+	MeshChunk(coord, ChunkGrid::PolygonizeTaskArg::Area);
+
+	SDFOp operation;
+	operation.type = SDF::Type::Box;
+	operation.size = FVector3f(100.f);
+	operation.position = position;
+
+	chunk_grid.modify_operations.Enqueue(operation);
+
+	//auto node = octree_manager->GetNodeFromPositionDepth(chunk.root.Get(), position, 5);
+	//node->Reset();
+}
+
 void UChunkProvider::Tick(float DeltaTime)
 {
 	//we need this, as otherwise it will tick twice when PIE' ing
@@ -422,9 +449,12 @@ void UChunkProvider::Tick(float DeltaTime)
 
 	if(chunk_settings->draw_octree) 
 	{
-		OctreeNode* node = chunk_grid.Get(current_chunk_coord).root.Get();
+		if(chunk_grid.chunks.Contains(current_chunk_coord))
+		{
+			OctreeNode* node = chunk_grid.Get(current_chunk_coord).root.Get();
 
-		octree_manager->DebugDrawOctree(node, 0, chunk_settings->draw_leaves, chunk_settings->draw_simplified_leaves, chunk_settings->debug_draw_how_deep);
+			octree_manager->DebugDrawOctree(GetWorld(), node, 0, chunk_settings->draw_leaves, chunk_settings->draw_simplified_leaves, chunk_settings->debug_draw_how_deep);
+		}
 	}
 
 #endif
@@ -434,11 +464,42 @@ void UChunkProvider::Tick(float DeltaTime)
 	//latent creation and polygonization
 	while(!chunk_grid.chunk_creation_jobs.IsEmpty())
 	{
-		TFunction<ChunkCreationResult()> job;
-		chunk_grid.chunk_creation_jobs.Dequeue(job);
+		TTuple<FIntVector, ChunkGrid::CreationTaskArg> tuple;
+		chunk_grid.chunk_creation_jobs.Dequeue(tuple);
+
+		const Chunk& chunk = chunk_grid.Get(tuple.Key);
+
+		FVector3f chunk_center = chunk.center;
+
+		OctreeSettingsMultithreadContext settings_context;
+		settings_context = *GetDefault<UOctreeSettings>();
+
+		float size = chunk_settings->chunk_size;
+
+		ChunkGrid::CreationTaskArg task_arg = tuple.Value;
+
+		SDFOp op;
+		if(task_arg == ChunkGrid::CreationTaskArg::ModifyOperation) chunk_grid.modify_operations.Dequeue(op);
 
 #if USE_MULTITHREADING
-		chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, MoveTemp(job)));
+		chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op]() -> ChunkCreationResult
+		{
+			ChunkCreationResult result;
+			result.chunk_coord = coord;
+
+			if(task_arg == ChunkGrid::CreationTaskArg::ModifyOperation)
+			{
+				result.created_root = octree_manager->RebuildOctree(chunk_center, size, settings_context, op);
+				result.newly_created = false;
+			}
+			else 
+			{
+				result.created_root = octree_manager->BuildOctree(chunk_center, size, settings_context);
+				result.newly_created = (task_arg == ChunkGrid::CreationTaskArg::NewlyCreated);
+			}
+
+			return result;
+		}));
 #else 
 		const ChunkCreationResult result = job();
 		chunk_grid.chunks[result.chunk_idx].root = result.created_root;
@@ -473,7 +534,7 @@ void UChunkProvider::Tick(float DeltaTime)
 			ChunkGrid::PolygonizeTaskArg task_arg = tuple.Value;
 
 			bool edge_case = false;
-			if(task_arg)
+			if(task_arg != ChunkGrid::PolygonizeTaskArg::Area)
 			{
 				if (task_arg == ChunkGrid::PolygonizeTaskArg::SlabNegative)
 				{
@@ -547,7 +608,7 @@ void UChunkProvider::Tick(float DeltaTime)
 				}
 			}
 			
-			bool negative_delta = task_arg == ChunkGrid::SlabNegative;
+			bool negative_delta = (task_arg == ChunkGrid::PolygonizeTaskArg::SlabNegative);
 
 			OctreeNode* root = chunk.root.Get();
 			bool newly_created = chunk.newly_created;
@@ -611,9 +672,6 @@ void UChunkProvider::Tick(float DeltaTime)
 		auto& result = chunk_grid.chunk_polygonize_tasks[i];
 		if (result.IsReady() && result.Get().collision_future.IsReady() && result.Get().mesh_future.IsReady())
 		{
-#if USE_NAMED_STATS
-			QUICK_SCOPE_CYCLE_COUNTER(Stat_CreateOrUpdateMesh)
-#endif
 			chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
 			i--;
 		}

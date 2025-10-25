@@ -4,9 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "DC_OctreeNode.h"
-
-#include "Interface/Core/RealtimeMeshKeys.h"
-#include "Interface/Core/RealtimeMeshDataStream.h"
+#include "Interface/Core/RealtimeMeshInterfaceFwd.h"
 
 struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {

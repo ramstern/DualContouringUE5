@@ -7,6 +7,7 @@
 #include "DC_Chunk.h"
 #include "DC_ChunkProviderSettings.h"
 #include "Misc/Optional.h"
+#include "DC_SDFOps.h"
 #include "DC_ChunkProvider.generated.h"
 /**
  * 
@@ -17,15 +18,17 @@ class ADC_OctreeRenderActor;
 class URealtimeMeshSimple;
 
 UCLASS()
-class UChunkProvider : public UTickableWorldSubsystem
+class DUALCONTOURINGTERRAIN_API UChunkProvider : public UTickableWorldSubsystem
 {
 	GENERATED_BODY()
+	
+public:
+	void ModifyOperation(FVector3f position);
 
+private:
 	// USubsystem implementation Begin
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
-
-private:
 
 	void ReloadChunks();
 	void ReloadReallocChunks();
@@ -46,18 +49,29 @@ private:
 
 		void Realloc(int32 new_load_distance);
 
-		enum PolygonizeTaskArg : uint8
+		enum class PolygonizeTaskArg : uint8
 		{
 			Area = 0,
 			SlabNegative = 1,
 			SlabPositive = 2
 		};
 
+		enum class CreationTaskArg : uint8
+		{
+			None = 0,
+			NewlyCreated = 1,
+			ModifyOperation = 2 
+		};
+
 		TMap<FIntVector3, Chunk> chunks;
-		TQueue<TFunction<ChunkCreationResult()>> chunk_creation_jobs;
+
+		TQueue<TTuple<FIntVector3, CreationTaskArg>> chunk_creation_jobs;
 		TArray<TFuture<ChunkCreationResult>> chunk_creation_tasks;
 		TQueue<TTuple<FIntVector3, PolygonizeTaskArg>> chunk_polygonize_jobs;
 		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
+
+		TQueue<SDFOp> modify_operations;
+
 		int32 dim;
 		FIntVector min_coord;
 		FIntVector3 current_generator_pos;
@@ -85,6 +99,7 @@ private:
 	void MeshChunk(const FIntVector3& coords, ChunkGrid::PolygonizeTaskArg task_arg);
 
 	void CreateChunk(FIntVector3 coord);
+	void RebuildChunk(FIntVector3 coord);
 
 	bool IsSafeToModifyChunks();
 
@@ -94,6 +109,7 @@ private:
 	FVector GetActiveCameraLocation();
 
 	FVector camera_pos = FVector();
+
 
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;

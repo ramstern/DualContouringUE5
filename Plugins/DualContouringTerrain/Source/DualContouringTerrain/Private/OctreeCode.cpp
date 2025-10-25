@@ -54,8 +54,6 @@ FVector3f child_offsets[8] =
 	{ 1, 1, 1}  // 7:(1,1,1)
 };
 
-
-
 //for polling noise and QEF calculations, better scaled UE coordinates.
 constexpr float scale_factor = 0.01f;
 constexpr float inv_scale_factor = 1.f / scale_factor;
@@ -69,7 +67,7 @@ constexpr unsigned char edges_corner_map[12][2] =
 
 void UOctreeCode::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context)
 {
-	const unsigned int MAX_ZERO_CROSSINGS = 6;
+	//const unsigned int MAX_ZERO_CROSSINGS = 6;
 	const int8 max_depth = settings_context.max_depth;
 	const float iso_surface = settings_context.iso_surface;
 	const float stddev_pos = settings_context.stddev_pos;
@@ -83,15 +81,15 @@ void UOctreeCode::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p
 
 		if (!node->children[this_idx])
 		{
-			OctreeNode* new_node = new OctreeNode();
-			new_node->depth = node->depth + 1;
-			new_node->center = node->center + child_offsets[this_idx] * node->size * 0.25f;
-			new_node->size = node->size * 0.5f;
+			node->children[this_idx] = MakeUnique<OctreeNode>();
+			//OctreeNode* new_node = new OctreeNode();
+			node->children[this_idx]->depth = node->depth + 1;
+			node->children[this_idx]->center = node->center + child_offsets[this_idx] * node->size * 0.25f;
+			node->children[this_idx]->size = node->size * 0.5f;
 
-			node->children[this_idx] = new_node;
 		}
 
-		node = node->children[this_idx];
+		node = node->children[this_idx].Get();
 	}
 
 	uint16 edge_mask = 0;
@@ -195,11 +193,9 @@ void UOctreeCode::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p
 #if UE_BUILD_DEBUG
 	if (isnan(node->leaf_data->minimizer.X) || isnan(node->leaf_data->minimizer.Y) || isnan(node->leaf_data->minimizer.Z))
 	{
-		//check(false);
+		check(false);
 	}
 #endif
-
-	//ConstructLeafNode_V2(node->children[this_idx], node_p, corner_densities, corners);
 }
 
 #include "SeamRecursionFunctions.inl"
@@ -270,11 +266,6 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
 #endif
-
-#if UE_BUILD_DEBUG
-	debug_edges.Empty();
-#endif
-
 
 	OctreeNode* root = new OctreeNode();
 	root->center = center;
@@ -374,6 +365,126 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 	return root;
 }
 
+OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, SDFOp sdf_operation)
+{
+#if USE_NAMED_STATS
+	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
+#endif
+
+		OctreeNode* root = new OctreeNode();
+	root->center = center;
+	root->depth = 0;
+	root->size = size;
+
+	int32 dim = GetDim(settings_context.max_depth) + 1;
+
+	TArray<float> x_pos, y_pos, z_pos;
+	x_pos.SetNumUninitialized(dim * dim * dim);
+	y_pos.SetNumUninitialized(dim * dim * dim);
+	z_pos.SetNumUninitialized(dim * dim * dim);
+
+	FVector3f min = center - size * 0.5f;
+	float vox_size = size / (dim - 1);
+
+	for (int32 x = 0; x < dim; x++)
+	{
+		for (int32 y = 0; y < dim; y++)
+		{
+			for (int32 z = 0; z < dim; z++)
+			{
+				int32 idx = Get1DIndexFrom3D(x, y, z, dim);
+				x_pos[idx] = (min.X + vox_size * x) * 0.01f;
+				y_pos[idx] = (min.Y + vox_size * y) * 0.01f;
+				z_pos[idx] = (min.Z + vox_size * z) * 0.01f;
+			}
+		}
+	}
+
+	TArray<float> noise;
+	{
+#if USE_NAMED_STATS
+		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_NoisePoll)
+#endif
+			noise = UNoiseDataGenerator::GetNoiseFromPositions3D_NonThreaded(x_pos.GetData(), y_pos.GetData(), z_pos.GetData(), dim * dim * dim, settings_context.seed);
+
+		for (int32 i = 0; i < dim*dim*dim; i++)
+		{
+			FVector3f point_pos = FVector3f(x_pos[i], y_pos[i], z_pos[i]);
+			
+			FVector3f local_pos = point_pos - (sdf_operation.position * 0.01f);
+
+			switch(sdf_operation.type)
+			{
+			case SDF::Type::Box:
+				noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, sdf_operation.size*0.01f));
+				break;
+			}
+		}
+	}
+
+
+	int32 vox_dim = dim - 1;
+
+	const float iso_surface = settings_context.iso_surface;
+
+	{
+#if USE_NAMED_STATS
+		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctee_voxbuilding)
+#endif
+			for (size_t x = 0; x < vox_dim; x++)
+			{
+				for (size_t y = 0; y < vox_dim; y++)
+				{
+					for (size_t z = 0; z < vox_dim; z++)
+					{
+#if USE_NAMED_STATS
+						QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree_voxiteration)
+#endif
+
+							//FVector3f local_node_query_p = FVector3f(x * vox_size + vox_size * 0.5f, y * vox_size + vox_size * 0.5f, z * vox_size + vox_size * 0.5f);
+							FIntVector3 lc = FIntVector3(x, y, z);
+
+						int32 idx_table[8];
+						idx_table[0] = Get1DIndexFrom3D(lc.X, lc.Y, lc.Z, dim);
+						idx_table[1] = Get1DIndexFrom3D(lc.X + 1, lc.Y, lc.Z, dim);
+						idx_table[2] = Get1DIndexFrom3D(lc.X, lc.Y, lc.Z + 1, dim);
+						idx_table[3] = Get1DIndexFrom3D(lc.X + 1, lc.Y, lc.Z + 1, dim);
+						idx_table[4] = Get1DIndexFrom3D(lc.X, lc.Y + 1, lc.Z, dim);
+						idx_table[5] = Get1DIndexFrom3D(lc.X + 1, lc.Y + 1, lc.Z, dim);
+						idx_table[6] = Get1DIndexFrom3D(lc.X, lc.Y + 1, lc.Z + 1, dim);
+						idx_table[7] = Get1DIndexFrom3D(lc.X + 1, lc.Y + 1, lc.Z + 1, dim);
+
+						//TArray<float> corner_densities = SampleOctreeNodeDensities(node);
+
+						const float corner_densities[8] = { noise[idx_table[0]], noise[idx_table[1]], noise[idx_table[2]],
+													  noise[idx_table[3]], noise[idx_table[4]], noise[idx_table[5]],
+													  noise[idx_table[6]], noise[idx_table[7]] };
+
+
+						int32 vox_idx = Get1DIndexFrom3D(x, y, z, vox_dim);
+						uint8 corners = 0;
+						for (uint8_t i = 0; i < 8; i++)
+						{
+							corners |= ((corner_densities[i] - iso_surface) <= 0.f) << i;
+						}
+
+						FVector3f world_pos = FVector3f(x * vox_size + vox_size * 0.5f, y * vox_size + vox_size * 0.5f, z * vox_size + vox_size * 0.5f) + (root->center - size * 0.5f);
+
+						if (corners != 255 && corners != 0)
+						{
+							ConstructLeafNode_V2(root, world_pos, corner_densities, corners, settings_context);
+						}
+					}
+				}
+			}
+	}
+	//ConstructChildNodes(root, size, noise, root_min, );
+
+	if (settings_context.simplify) SimplifyOctree(root, settings_context.simplify_threshold);
+
+	return root;
+}
+
 RealtimeMesh::FRealtimeMeshStreamSet UOctreeCode::PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta)
 {
 	RealtimeMesh::FRealtimeMeshStreamSet stream_set;
@@ -433,7 +544,7 @@ bool UOctreeCode::SimplifyOctree(OctreeNode* node, float simplify_threshold)
 
 	for (uint8 i = 0; i < 8; i++)
 	{
-		if(SimplifyOctree(node->children[i], simplify_threshold)) // returns true if node exists
+		if(SimplifyOctree(node->children[i].Get(), simplify_threshold)) // returns true if node exists
 		{
 			mid_sign = (node->children[i]->corners >> (7 - i)) & 1;
 			if (!simplify) continue;
@@ -487,8 +598,9 @@ bool UOctreeCode::SimplifyOctree(OctreeNode* node, float simplify_threshold)
 
 	for (size_t i = 0; i < 8; i++)
 	{
-		delete node->children[i];
-		node->children[i] = nullptr;
+		/*delete node->children[i];
+		node->children[i] = nullptr;*/
+		node->children[i].Reset();
 	}
 
 	return true;
@@ -502,7 +614,7 @@ void UOctreeCode::BuildMeshData(OctreeNode* node, MeshBuilder& builder)
 	{
 		for (uint8 i = 0; i < 8; i++)
 		{
-			BuildMeshData(node->children[i], builder);
+			BuildMeshData(node->children[i].Get(), builder);
 		}
 	}
 	else 
@@ -524,7 +636,7 @@ void UOctreeCode::BuildStitchMeshData(OctreeNode* node, OctreeNode* parent, Mesh
 		{
 			for (uint8 i = 0; i < 4; i++)
 			{
-				self(self, node->children[i], builder);
+				self(self, node->children[i].Get(), builder);
 			}
 		}
 		else 
@@ -573,24 +685,24 @@ void UOctreeCode::DC_ProcessCell(OctreeNode* node, MeshBuilder& builder)
 		// recurse to each child 
 		for (size_t i = 0; i < 8; i++)
 		{
-			DC_ProcessCell(node->children[i], builder);
+			DC_ProcessCell(node->children[i].Get(), builder);
 		}
 
 		//handles every interior face of the node
 		for (size_t i = 0; i < 12; i++)
 		{
-			OctreeNode* child_1 = node->children[process_cell_face_nodes[i][0]];
-			OctreeNode* child_2 = node->children[process_cell_face_nodes[i][1]];
+			OctreeNode* child_1 = node->children[process_cell_face_nodes[i][0]].Get();
+			OctreeNode* child_2 = node->children[process_cell_face_nodes[i][1]].Get();
 			DC_ProcessFace(child_1, child_2, process_cell_face_nodes[i][2], builder);
 		}
 
 		//interior 6 edges of this node
 		for (size_t i = 0; i < 6; i++)
 		{
-			OctreeNode* child_1 = node->children[process_edge_nodes[i][0]];
-			OctreeNode* child_2 = node->children[process_edge_nodes[i][1]];
-			OctreeNode* child_3 = node->children[process_edge_nodes[i][2]];
-			OctreeNode* child_4 = node->children[process_edge_nodes[i][3]];
+			OctreeNode* child_1 = node->children[process_edge_nodes[i][0]].Get();
+			OctreeNode* child_2 = node->children[process_edge_nodes[i][1]].Get();
+			OctreeNode* child_3 = node->children[process_edge_nodes[i][2]].Get();
+			OctreeNode* child_4 = node->children[process_edge_nodes[i][3]].Get();
 			DC_ProcessEdge(child_1, child_2, child_3, child_4, process_edge_nodes[i][4], builder);
 		}
 	}
@@ -638,7 +750,7 @@ void UOctreeCode::DC_ProcessFace(OctreeNode* node_1, OctreeNode* node_2, unsigne
 			OctreeNode* face_node_1 = nullptr;
 			if(node_1->type == NODE_INTERNAL)
 			{
-				face_node_1 = node_1->children[process_face_direction_cells[direction][face_idx][0]];
+				face_node_1 = node_1->children[process_face_direction_cells[direction][face_idx][0]].Get();
 			}
 			else //node is a leaf / collapsed leaf 
 			{
@@ -648,7 +760,7 @@ void UOctreeCode::DC_ProcessFace(OctreeNode* node_1, OctreeNode* node_2, unsigne
 			OctreeNode* face_node_2 = nullptr;
 			if(node_2->type == NODE_INTERNAL)
 			{
-				face_node_2 = node_2->children[process_face_direction_cells[direction][face_idx][1]];
+				face_node_2 = node_2->children[process_face_direction_cells[direction][face_idx][1]].Get();
 			}
 			else face_node_2 = node_2;
 
@@ -688,7 +800,7 @@ void UOctreeCode::DC_ProcessFace(OctreeNode* node_1, OctreeNode* node_2, unsigne
 				}
 				else 
 				{
-					edge_nodes[node_idx] = face_nodes[order[node_idx]]->children[indices[node_idx]];
+					edge_nodes[node_idx] = face_nodes[order[node_idx]]->children[indices[node_idx]].Get();
 				}
 			}
 
@@ -842,7 +954,7 @@ void UOctreeCode::DC_ProcessEdge(OctreeNode* node_1, OctreeNode* node_2, OctreeN
 				}
 				else 
 				{
-					next_edge_nodes[node_idx] = edge_nodes[node_idx]->children[process_sub_edge_nodes[direction][i][node_idx]];
+					next_edge_nodes[node_idx] = edge_nodes[node_idx]->children[process_sub_edge_nodes[direction][i][node_idx]].Get();
 				}
 			}
 
@@ -1071,28 +1183,28 @@ void UOctreeCode::DC_ProcessEdge(StitchOctreeNode* node_1, StitchOctreeNode* nod
 }
 
 
-void UOctreeCode::DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep)
+void UOctreeCode::DebugDrawOctree(UWorld* world, OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep)
 {
 	if(!node || current_depth == how_deep) return;
 
 	if(node->type == NODE_LEAF && draw_leaves) 
 	{
-		DebugDrawNode(node, node->size, FColor::Green);
+		DebugDrawNode(world,node, node->size, FColor::Green);
 	}
 	else if(node->type == NODE_COLLAPSED_LEAF && draw_simple_leaves) 
 	{
-		DebugDrawNode(node, node->size, FColor::Red);
+		DebugDrawNode(world,node, node->size, FColor::Red);
 	}
 	else if(node->type == NODE_INTERNAL)
 	{
-		DebugDrawNode(node, node->size, FColor::White);
+		DebugDrawNode(world,node, node->size, FColor::White);
 	}
 
 	for (size_t i = 0; i < 8; i++)
 	{
 		if(node->children[i])
 		{
-			DebugDrawOctree(node->children[i], current_depth+1, draw_leaves, draw_simple_leaves, how_deep);
+			DebugDrawOctree(world, node->children[i].Get(), current_depth+1, draw_leaves, draw_simple_leaves, how_deep);
 		}
 	}
 }
@@ -1108,9 +1220,9 @@ void UOctreeCode::DebugDrawDCData(OctreeNode* node)
 	DebugDrawNodeMinimizer(node);
 }
 
-void UOctreeCode::DebugDrawNode(OctreeNode* node, float size, FColor color)
+void UOctreeCode::DebugDrawNode(UWorld* world, OctreeNode* node, float size, FColor color)
 {
-	DrawDebugBox(GetWorld(), FVector(node->center), FVector(size * 0.5f), color);
+	DrawDebugBox(world, FVector(node->center), FVector(size * 0.5f), color);
 }
 
 void UOctreeCode::DebugDrawNodeMinimizer(OctreeNode* node)
@@ -1119,7 +1231,7 @@ void UOctreeCode::DebugDrawNodeMinimizer(OctreeNode* node)
 
 	for (size_t i = 0; i < 8; i++)
 	{
-		DebugDrawNodeMinimizer(node->children[i]);	
+		DebugDrawNodeMinimizer(node->children[i].Get());	
 	}
 
 	if(node->type)
@@ -1158,14 +1270,25 @@ FVector3f UOctreeCode::FDMGetNormal(const FVector3f& at_point, float h, int32 se
 	return normal.GetUnsafeNormal();
 }
 
-OctreeNode* UOctreeCode::GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth)
+TUniquePtr<OctreeNode>* UOctreeCode::GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth) const
 {
+	checkSlow(depth <= octree_settings->max_depth)
+
 	OctreeNode* current = start;
+	OctreeNode* parent = nullptr;
+	uint8 child_idx = 255;
+
 	while(current->depth != depth)
 	{
 		uint8 idx = GetChildNodeFromPosition(p, current->center);
-		current = current->children[idx];
+
+		if(!current->children[idx]) break;
+		
+		parent = current;
+		child_idx = idx;
+
+		current = current->children[idx].Get();
 	}
 
-	return current;
+	return &parent->children[child_idx];
 }

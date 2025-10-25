@@ -26,7 +26,7 @@ public class DualContouringTerrain : ModuleRules
 			new string[]
 			{
 				"Core",
-                "DeveloperSettings",
+                "DeveloperSettings","RealtimeMeshComponent"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -37,7 +37,7 @@ public class DualContouringTerrain : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
-                "FastNoise2Library", "RealtimeMeshComponent", "RenderCore"
+                "FastNoise2Library", "RenderCore"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

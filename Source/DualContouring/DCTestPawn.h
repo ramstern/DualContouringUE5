@@ -10,6 +10,7 @@
  * 
  */
 class UInputMappingContext; class UInputAction;
+class UChunkProvider;
 
 UCLASS()
 class DUALCONTOURING_API ADCTestPawn : public ADefaultPawn
@@ -24,6 +25,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input") UInputAction* IA_raycast = nullptr;
 	UPROPERTY(EditAnywhere, Category = "Trace") float ray_length = 10000.f;
 private:
+
+	UChunkProvider* chunk_provider = nullptr;
 
 	void RaycastOnce();
 	bool DoViewRaycast(FHitResult& OutHit) const;

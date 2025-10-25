@@ -34,7 +34,7 @@ public:
 	OctreeNode() = default;
 	~OctreeNode();
 
-	OctreeNode* children[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+	TUniquePtr<OctreeNode> children[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 	FVector3f center = FVector3f::ZeroVector;
 	int8 depth = 0;
 	unsigned char type = NODE_INTERNAL;

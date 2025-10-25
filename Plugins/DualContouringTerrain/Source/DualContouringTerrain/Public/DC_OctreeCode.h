@@ -8,6 +8,7 @@
 #include "DC_OctreeNode.h"
 #include "Interface/Core/RealtimeMeshKeys.h"
 #include "Interface/Core/RealtimeMeshDataStream.h"
+#include "DC_SDFOps.h"
 #include "DC_OctreeCode.generated.h"
 
 class UNoiseDataGenerator;
@@ -35,13 +36,17 @@ public:
 	
 	// builds an octree and returns it
 	static OctreeNode* BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context);
+	static OctreeNode* RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, SDFOp sdf_operation);
+	
+	//get octree node from position p inside starting (parent) node, at depth depth.
+	TUniquePtr<OctreeNode>* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth) const;
 
 	//input: specific ordering of the main node and all its neighbor nodes
 	static RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, bool negative_delta);
 	static RealtimeMesh::FRealtimeMeshStreamSet PolygonizeOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& nodes, const TArray<OctreeNode*, TInlineAllocator<8>>& ec_nodes, bool negative_delta);
 
 	//debug draw octree node
-	void DebugDrawOctree(OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);
+	void DebugDrawOctree(UWorld* world, OctreeNode* node, int32 current_depth, bool draw_leaves, bool draw_simple_leaves, int32 how_deep);
 private:
 
 	static void ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context);
@@ -51,7 +56,6 @@ private:
 	// get node size from depth, could be tableized
 	FORCEINLINE float SizeFromNodeDepth(uint8 depth) { return 0.f / std::exp2f(static_cast<float>(depth)); };
 
-	
 	// simplify the octree with residual error
 	static bool SimplifyOctree(OctreeNode* node, float simplify_threshold);
 
@@ -78,7 +82,7 @@ private:
 	
 	//debug draw dc data
 	void DebugDrawDCData(OctreeNode* node);
-	void DebugDrawNode(OctreeNode* node, float size, FColor color);
+	void DebugDrawNode(UWorld* world, OctreeNode* node, float size, FColor color);
 	void DebugDrawNodeMinimizer(OctreeNode* node);
 
 	// get normal via fdm 
@@ -96,7 +100,6 @@ private:
 		return (y << 2) | (z << 1) | x;
 	}
 
-	OctreeNode* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth);
 
 	static FORCEINLINE int32 Get1DIndexFrom3D(int32 x, int32 y, int32 z, int32 dim)
 	{
@@ -105,13 +108,4 @@ private:
 
 	const UOctreeSettings* octree_settings = nullptr;
 	UNoiseDataGenerator* noise_gen = nullptr;
-
-#if UE_BUILD_DEBUG
-	struct dbg_edge
-	{
-		FVector start;
-		FVector end;
-	};
-	TArray<dbg_edge> debug_edges; 
-#endif
 };

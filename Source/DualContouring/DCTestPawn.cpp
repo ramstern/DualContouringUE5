@@ -4,10 +4,13 @@
 #include "DCTestPawn.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "DC_ChunkProvider.h"
 
 void ADCTestPawn::BeginPlay()
 {
 	Super::BeginPlay();
+
+	chunk_provider = GetWorld()->GetSubsystem<UChunkProvider>();
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
@@ -47,5 +50,6 @@ void ADCTestPawn::RaycastOnce()
 	FHitResult hit_result;
 	const bool hit = DoViewRaycast(hit_result);
 
-	UE_LOG(LogTemp, Display, TEXT("%i"), hit);
+	if(hit) chunk_provider->ModifyOperation(FVector3f(hit_result.ImpactPoint));
+	//UE_LOG(LogTemp, Display, TEXT("%i"), hit);
 }

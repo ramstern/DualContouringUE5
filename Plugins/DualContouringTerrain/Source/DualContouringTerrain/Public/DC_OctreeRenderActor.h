@@ -20,7 +20,7 @@ public:
 	ADC_OctreeRenderActor();
 
 	//returns whether the mesh and its rmc were newly created, instead of pooled
-	bool FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh);
+	bool FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh, UMaterialInterface* material_interface);
 
 	void DestroyAllRMCs();
 
@@ -32,8 +32,6 @@ protected:
 
 	TArray<URealtimeMeshComponent*> rmcs;
 	TQueue<int32> reuse_indices;
-
-	const UOctreeSettings* octree_settings = nullptr;
 
 public:	
 	virtual void Destroyed() override;

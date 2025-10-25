@@ -13,16 +13,12 @@ ADC_OctreeRenderActor::ADC_OctreeRenderActor()
 	PrimaryActorTick.bCanEverTick = false;
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
-
-	octree_settings = GetDefault<UOctreeSettings>();
-	octree_settings->mesh_material.LoadSynchronous();
-
 	//mesh_component = CreateDefaultSubobject<URealtimeMeshComponent>(TEXT("RealtimeMesh"));
 	//mesh_component->SetupAttachment(RootComponent);
 	//mesh_component->bCastShadowAsTwoSided = true;
 }
 
-bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh)
+bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh, UMaterialInterface* material_interface)
 {
 	//check(IsInGameThread());
 
@@ -49,7 +45,7 @@ bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh)
 
 		out_mesh->ClearFlags(RF_Transactional);
 		out_mesh->SetFlags(RF_Transient);
-		out_mesh->SetupMaterialSlot(0, "PrimaryMaterial", octree_settings->mesh_material.Get());
+		out_mesh->SetupMaterialSlot(0, "PrimaryMaterial", material_interface);
 
 		rmc->SetupAttachment(RootComponent);
 

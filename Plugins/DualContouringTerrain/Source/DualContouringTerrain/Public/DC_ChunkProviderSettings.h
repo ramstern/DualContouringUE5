@@ -27,6 +27,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, meta = (NoRebuild = "true"))
 	bool stop_chunk_loading = false;
 
+	UPROPERTY(EditAnywhere, Config, Category = "Rendering", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
+	TSoftObjectPtr<UMaterialInterface> terrain_material;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Debug Drawing", meta = (NoRebuild = "true"))
 	bool draw_debug_chunks;
 

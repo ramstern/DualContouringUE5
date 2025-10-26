@@ -527,7 +527,7 @@ void UChunkProvider::ModifyOperation(const SDFOp& sdf_operation)
 	}
 
 	RebuildChunk(coord);
-	MeshChunk(coord, on_seam ? PolygonizeTaskArg::RebuildAllSeams : PolygonizeTaskArg::Area);
+	MeshChunk(coord, PolygonizeTaskArg::RebuildAllSeams);
 }
 
 void UChunkProvider::Tick(float DeltaTime)
@@ -596,14 +596,16 @@ void UChunkProvider::Tick(float DeltaTime)
 			SDFOp op;
 			chunk_grid.modify_operations.Dequeue(op);
 
-			chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field]() -> ChunkCreationResult
+			chunk_grid.GetMutable(tuple.Key).sdf_ops.Add(op);
+
+			chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
 			{
 				ChunkCreationResult result;
 				result.chunk_coord = coord;
 
 				EditNoiseField(noise_field, chunk_center, size, settings_context.max_depth, op);
 
-				result.created_root = UOctreeCode::RebuildOctree(chunk_center, size, settings_context, noise_field, op);
+				result.created_root = UOctreeCode::RebuildOctree(chunk_center, size, settings_context, noise_field, sdf_ops);
 				result.task_arg = task_arg;
 				
 				return result;

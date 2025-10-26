@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "DC_OctreeNode.h"
 #include "Interface/Core/RealtimeMeshInterfaceFwd.h"
+#include "DC_SDFOps.h"
 
 enum class PolygonizeTaskArg : uint8
 {
@@ -60,5 +61,6 @@ public:
 	uint8 ping_counter = 0;
 	URealtimeMeshSimple* mesh = nullptr;
 	TArray<float> noise_field;
+	TArray<SDFOp> sdf_ops;
 };
 

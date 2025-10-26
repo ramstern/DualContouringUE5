@@ -65,7 +65,7 @@ constexpr unsigned char edges_corner_map[12][2] =
 	{0,1},{2,3},{4,5},{6,7}		// z-axis
 };
 
-void UOctreeCode::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context)
+void UOctreeCode::ConstructLeafNode(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context)
 {
 	//const unsigned int MAX_ZERO_CROSSINGS = 6;
 	const int8 max_depth = settings_context.max_depth;
@@ -147,6 +147,139 @@ void UOctreeCode::ConstructLeafNode_V2(OctreeNode* node, const FVector3f& node_p
 		//float alpha_density = noise_gen->GetNoiseSingle3D(intersection.X * scale_factor, intersection.Y * scale_factor, intersection.Z * scale_factor) - octree_settings->iso_surface;
 
 		FVector3f normal = FDMGetNormal(intersection * scale_factor, fdm_normal_offset, seed);
+		vert_normal += normal;
+
+		vox_pq += quadric3::probabilistic_plane_quadric(intersection * scale_factor, normal, stddev_pos, stddev_normal);
+		edge_count++;
+	}
+
+	vert_normal /= edge_count;
+
+	node->leaf_data.minimizer = vox_pq.minimizer();
+
+#if CLAMP_MINIMIZERS
+
+	float half_size = node->size * 0.5f * scale_factor;
+	FVector3f scaled_center = node->center * scale_factor;
+
+	if (node->leaf_data->minimizer.X > scaled_center.X + half_size)
+	{
+		node->leaf_data->minimizer.X = scaled_center.X + half_size;
+	}
+	if (node->leaf_data->minimizer.Y > scaled_center.Y + half_size)
+	{
+		node->leaf_data->minimizer.Y = scaled_center.Y + half_size;
+	}
+	if (node->leaf_data->minimizer.Z > scaled_center.Z + half_size)
+	{
+		node->leaf_data->minimizer.Z = scaled_center.Z + half_size;
+	}
+
+
+	if (node->leaf_data->minimizer.X < scaled_center.X - half_size)
+	{
+		node->leaf_data->minimizer.X = scaled_center.X - half_size;
+	}
+	if (node->leaf_data->minimizer.Y < scaled_center.Y - half_size)
+	{
+		node->leaf_data->minimizer.Y = scaled_center.Y - half_size;
+	}
+	if (node->leaf_data->minimizer.Z < scaled_center.Z - half_size)
+	{
+		node->leaf_data->minimizer.Z = scaled_center.Z - half_size;
+	}
+#endif
+
+#if UE_BUILD_DEBUG
+	if (isnan(node->leaf_data->minimizer.X) || isnan(node->leaf_data->minimizer.Y) || isnan(node->leaf_data->minimizer.Z))
+	{
+		check(false);
+	}
+#endif
+}
+
+void UOctreeCode::ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context, const TArray<SDFOp>& sdf_ops)
+{
+	//const unsigned int MAX_ZERO_CROSSINGS = 6;
+	const int8 max_depth = settings_context.max_depth;
+	const float iso_surface = settings_context.iso_surface;
+	const float stddev_pos = settings_context.stddev_pos;
+	const float stddev_normal = settings_context.stddev_normal;
+	const float fdm_normal_offset = settings_context.normal_fdm_offset;
+	const int32 seed = settings_context.seed;
+
+	while (node->depth != max_depth)
+	{
+		uint8 this_idx = GetChildNodeFromPosition(node_p, node->center);
+
+		if (!node->children[this_idx])
+		{
+			node->children[this_idx] = MakeUnique<OctreeNode>();
+			//OctreeNode* new_node = new OctreeNode();
+			node->children[this_idx]->depth = node->depth + 1;
+			node->children[this_idx]->center = node->center + child_offsets[this_idx] * node->size * 0.25f;
+			node->children[this_idx]->size = node->size * 0.5f;
+
+		}
+
+		node = node->children[this_idx].Get();
+	}
+
+	uint16 edge_mask = 0;
+	for (uint8 i = 0; i < 12; i++)
+	{
+		auto c1 = edges_corner_map[i][0];
+		auto c2 = edges_corner_map[i][1];
+
+		edge_mask |= (((corners >> c1) ^ (corners >> c2)) & 1) << i;
+	}
+
+	//node is a leaf
+	node->type = NODE_LEAF;
+	node->corners = corners;
+
+	//FVector3f mass_point{};
+	uint8 edge_count = 0;
+
+	//UE_ASSUME(edge_count != 0);
+	FVector3f& vert_normal = node->leaf_data.normal;
+	quadric3& vox_pq = node->leaf_data.qef;
+
+	const FVector3f node_center = node->center;
+	const float node_size = node->size;
+
+	while (edge_mask /*&& edge_count < MAX_ZERO_CROSSINGS*/)
+	{
+		int32 idx = FMath::CountTrailingZeros(static_cast<uint32>(edge_mask));
+
+		//unset last 1 bit trick
+		edge_mask &= (edge_mask - 1);
+
+		/*unsigned char s1 = (corners >> edges_corner_map[i][0]) & 1;
+		unsigned char s2 = (corners >> edges_corner_map[i][1]) & 1;
+
+		if (s1 == s2) continue;*/
+
+		//detected sign change on current edge
+		FVector3f corner_1 = (child_offsets[edges_corner_map[idx][0]] * node_size * 0.5f) + node_center;
+		FVector3f corner_2 = (child_offsets[edges_corner_map[idx][1]] * node_size * 0.5f) + node_center;
+
+		float d1 = corner_densities[edges_corner_map[idx][0]] - iso_surface;
+		float d2 = corner_densities[edges_corner_map[idx][1]] - iso_surface;
+
+		// (1-alpha)*d1 + alpha*d2 = 0
+		// d1 - alpha*d1 + alpha*d2 = 0
+		// d1 + alpha(-d1+d2) = 0
+		// alpha = d1 / (d1-d2)
+		float alpha = d1 / (d1 - d2 + FLT_EPSILON);
+
+		FVector3f intersection = FMath::Lerp(corner_1, corner_2, alpha);
+		//mass_point += intersection;
+
+		//at 32 vox size, i dont think it's worth doing better zero crossing. below usually gives values in order of 0.001 > x > -0.001
+		//float alpha_density = noise_gen->GetNoiseSingle3D(intersection.X * scale_factor, intersection.Y * scale_factor, intersection.Z * scale_factor) - octree_settings->iso_surface;
+
+		FVector3f normal = FDMGetNormal_SDF(intersection * scale_factor, fdm_normal_offset, seed, sdf_ops);
 		vert_normal += normal;
 
 		vox_pq += quadric3::probabilistic_plane_quadric(intersection * scale_factor, normal, stddev_pos, stddev_normal);
@@ -324,7 +457,7 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 
 				if(corners != 255 && corners != 0)
 				{
-					ConstructLeafNode_V2(root, world_pos, corner_densities, corners, settings_context);
+					ConstructLeafNode(root, world_pos, corner_densities, corners, settings_context);
 				}
 			}
 		}
@@ -337,7 +470,7 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 	return root;
 }
 
-OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const SDFOp& sdf_op)
+OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
@@ -401,7 +534,7 @@ OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const Octre
 
 						if (corners != 255 && corners != 0)
 						{
-							ConstructLeafNode_V2(root, world_pos, corner_densities, corners, settings_context);
+							ConstructLeafNode_Edit(root, world_pos, corner_densities, corners, settings_context, sdf_ops);
 						}
 					}
 				}
@@ -1191,6 +1324,57 @@ FVector3f UOctreeCode::FDMGetNormal(const FVector3f& at_point, float h, int32 se
 
 #if UE_BUILD_DEBUG
 	if(normal.X == 0.f && normal.Y == 0.f && normal.Z == 0.f) 
+	{
+		//check(false);
+	}
+#endif
+
+	return normal.GetUnsafeNormal();
+}
+
+FVector3f UOctreeCode::FDMGetNormal_SDF(const FVector3f& at_point, float h, int32 seed, const TArray<SDFOp>& sdf_ops)
+{
+	//x, y, z axii order
+	const float x_positions[6] = { at_point.X + h,  at_point.X - h, at_point.X, at_point.X, at_point.X, at_point.X };
+	const float y_positions[6] = { at_point.Y,  at_point.Y, at_point.Y + h, at_point.Y - h, at_point.Y, at_point.Y };
+	const float z_positions[6] = { at_point.Z,  at_point.Z, at_point.Z, at_point.Z, at_point.Z + h, at_point.Z - h };
+
+	TArray<float> noise = UNoiseDataGenerator::GetNoiseFromPositions3D_NonThreaded(x_positions, y_positions, z_positions, 6, seed);
+
+	for (int32 i = 0; i < 6; i++)
+	{
+		FVector3f pos = FVector3f(x_positions[i], y_positions[i], z_positions[i]);
+
+		for (int32 sdf_idx = 0; sdf_idx < sdf_ops.Num(); sdf_idx++)
+		{
+			const SDFOp& sdf_op = sdf_ops[sdf_idx];
+
+			FVector3f local_pos = pos - (sdf_op.position*0.01f);
+			
+			switch (sdf_op.mod_type)
+			{
+			case SDFOp::ModType::Subtract:
+				switch (sdf_op.sdf_type)
+				{
+				case SDFOp::SDFType::Box:
+					noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, ((sdf_op.bounds_size * 0.5f) * 0.01f)));
+					break;
+				case SDFOp::SDFType::Sphere:
+					break;
+				}
+				break;
+			case SDFOp::ModType::Union:
+				break;
+			}
+		}
+	}
+
+	FVector3f normal = FVector3f(noise[0] - noise[1], noise[2] - noise[3], noise[4] - noise[5]);
+
+	normal /= (2.f * h);
+
+#if UE_BUILD_DEBUG
+	if (normal.X == 0.f && normal.Y == 0.f && normal.Z == 0.f)
 	{
 		//check(false);
 	}

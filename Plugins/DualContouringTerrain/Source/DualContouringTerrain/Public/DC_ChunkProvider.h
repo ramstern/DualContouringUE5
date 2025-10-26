@@ -106,6 +106,8 @@ private:
 	bool build_initial_area = false;
 	TSet<FIntVector3> temp_created_chunks;
 
+	FQueuedThreadPool* thread_pool = nullptr;
+
 	virtual void Tick(float DeltaTime) override;
 	TStatId GetStatId() const override;
 

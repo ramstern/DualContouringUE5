@@ -35,8 +35,8 @@ public:
 	virtual void Deinitialize() override;
 	
 	// builds an octree and returns it
-	static OctreeNode* BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise);
-	static OctreeNode* RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops);
+	static TUniquePtr<OctreeNode> BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise);
+	static TUniquePtr<OctreeNode> RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops);
 	
 	//get octree node from position p inside starting (parent) node, at depth depth.
 	TUniquePtr<OctreeNode>* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth) const;

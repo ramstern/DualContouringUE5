@@ -36,15 +36,6 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 
 	chunk_settings->terrain_material.LoadSynchronous();
 
-	Init(false);
-}
-
-void UChunkProvider::Init(bool simulating)
-{
-	UE_LOG(LogTemp, Display, TEXT(" INIT called on: %i"), GetWorld()->WorldType.GetIntValue());
-
-	//Collection.InitializeDependency(UAOctreeCode::StaticClass());
-
 	FActorSpawnParameters Params;
 	Params.Name = TEXT("DC_OctreeRenderActor");
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -73,6 +64,19 @@ void UChunkProvider::Init(bool simulating)
 		render_actor = created_render_actor;
 	}
 
+	Init(false);
+}
+
+void UChunkProvider::Init(bool simulating)
+{
+	UE_LOG(LogTemp, Display, TEXT(" INIT called on: %i"), GetWorld()->WorldType.GetIntValue());
+	
+	thread_pool = FQueuedThreadPool::Allocate();
+	const int32 thread_num = FMath::Max(1, FPlatformMisc::NumberOfWorkerThreadsToSpawn() - 2);
+	const int32 stack_size = 256*1024;
+	const EThreadPriority thread_prio = EThreadPriority::TPri_Normal;
+	thread_pool->Create(thread_num, stack_size, thread_prio, TEXT("DC_ThreadPool"));
+
 	/*Params.Name = TEXT("TerrainFollowTest");
 	test_follow_actor = GetWorld()->SpawnActor<AActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
 	test_follow_actor->SetRootComponent( NewObject<USceneComponent>(test_follow_actor) );*/
@@ -84,13 +88,13 @@ void UChunkProvider::Cleanup(bool simulating)
 
 	chunk_grid.Cleanup();
 
+	render_actor->DestroyAllRMCs();
+
+	thread_pool->Destroy();
+	delete thread_pool;
+	thread_pool = nullptr;
+
 	FlushRenderingCommands();
-
-	render_actor->Destroy();
-	render_actor = nullptr;
-
-	/*test_follow_actor->Destroy();
-	test_follow_actor = nullptr;*/
 }
 
 void UChunkProvider::Deinitialize()
@@ -107,7 +111,10 @@ void UChunkProvider::Deinitialize()
 		FEditorDelegates::EndPIE.RemoveAll(this);
 	}
 #endif
-	Cleanup(false);	
+	Cleanup(false);
+
+	render_actor->Destroy();
+	render_actor = nullptr;
 }
 
 void UChunkProvider::ReloadChunks()
@@ -253,19 +260,24 @@ void UChunkProvider::EditNoiseField(TArray<float>& noise, const FVector3f& cente
 
 		FVector3f local_pos = point_pos - (sdf_op.position * 0.01f);
 
+		float sdf_val;
+		switch (sdf_op.sdf_type)
+		{
+		case SDFOp::SDFType::Box:
+			sdf_val = SDF::Box(local_pos, ((sdf_op.bounds_size * 0.5f) * 0.01f));
+			break;
+		case SDFOp::SDFType::Sphere:
+			sdf_val = SDF::Sphere(local_pos, (sdf_op.bounds_size.X*0.5f) * 0.01f);
+			break;
+		}
+
 		switch (sdf_op.mod_type)
 		{
 		case SDFOp::ModType::Subtract:
-			switch (sdf_op.sdf_type)
-			{
-			case SDFOp::SDFType::Box:
-				noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, ((sdf_op.bounds_size*0.5f)*0.01f)));
-				break;
-			case SDFOp::SDFType::Sphere:
-				break;
-			}
+			noise[i] = FMath::Max(noise[i], -sdf_val);
 			break;
 		case SDFOp::ModType::Union:
+			noise[i] = FMath::Min(noise[i], sdf_val);
 			break;
 		}
 	}
@@ -598,7 +610,7 @@ void UChunkProvider::Tick(float DeltaTime)
 
 			chunk_grid.GetMutable(tuple.Key).sdf_ops.Add(op);
 
-			chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
+			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
 			{
 				ChunkCreationResult result;
 				result.chunk_coord = coord;
@@ -613,7 +625,7 @@ void UChunkProvider::Tick(float DeltaTime)
 		}
 		else 
 		{
-			chunk_grid.chunk_creation_tasks.Add(Async(EAsyncExecution::LargeThreadPool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg]() -> ChunkCreationResult
+			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg]() -> ChunkCreationResult
 			{
 				ChunkCreationResult result;
 				result.chunk_coord = coord;
@@ -633,7 +645,7 @@ void UChunkProvider::Tick(float DeltaTime)
 			ChunkCreationResult creation_result = result.Consume();
 
 			Chunk& chunk = chunk_grid.GetMutable(creation_result.chunk_coord);
-			chunk.root = TUniquePtr<OctreeNode>(creation_result.created_root);
+			chunk.root = MoveTemp(creation_result.created_root);
 			chunk.newly_created = creation_result.task_arg == CreationTaskArg::NewlyCreated;
 
 			if(creation_result.task_arg != CreationTaskArg::ModifyOperation)
@@ -751,7 +763,7 @@ void UChunkProvider::Tick(float DeltaTime)
 				ec_seam_octants.SetNumUninitialized(8);
 				FillSeamOctreeNodes(ec_seam_octants, !negative_delta, coord, root);
 
-				chunk_grid.chunk_polygonize_tasks.Add(Async(EAsyncExecution::LargeThreadPool,
+				chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
 			[this, negative_delta, seam_octants, ec_seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
 				{
 					ChunkPolygonizeResult result;
@@ -780,7 +792,7 @@ void UChunkProvider::Tick(float DeltaTime)
 			}
 			else 
 			{
-				chunk_grid.chunk_polygonize_tasks.Add(Async(EAsyncExecution::LargeThreadPool,
+				chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
 			[this, negative_delta, seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
 				{
 					ChunkPolygonizeResult result;
@@ -813,6 +825,10 @@ void UChunkProvider::Tick(float DeltaTime)
 		auto& result = chunk_grid.chunk_polygonize_tasks[i];
 		if (result.IsReady() && result.Get().collision_future.IsReady() && result.Get().mesh_future.IsReady())
 		{
+			result.GetMutable().collision_future.Consume();
+			result.GetMutable().mesh_future.Consume();
+			result.Consume();
+
 			chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
 			i--;
 		}
@@ -941,12 +957,6 @@ void UChunkProvider::ChunkGrid::Cleanup()
 	{
 		auto& future = chunk_creation_tasks[i];
 		auto result = future.Consume();
-		OctreeNode* possible_root = result.created_root;
-		if (possible_root)
-		{
-			delete possible_root;
-			possible_root = nullptr;
-		}
 	}
 	chunk_creation_tasks.Empty();
 

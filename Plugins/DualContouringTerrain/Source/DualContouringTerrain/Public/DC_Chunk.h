@@ -26,7 +26,7 @@ struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {
 	FIntVector3 chunk_coord;
 	CreationTaskArg task_arg = CreationTaskArg::None;
-	OctreeNode* created_root = nullptr;
+	TUniquePtr<OctreeNode> created_root = nullptr;
 	TArray<float> noise_field;
 
 	ChunkCreationResult() = default;

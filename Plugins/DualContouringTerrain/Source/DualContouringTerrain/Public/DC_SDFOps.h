@@ -8,6 +8,7 @@ class DUALCONTOURINGTERRAIN_API SDF
 {
 public:
 	static float Box(const FVector3f& p, const FVector3f& extent);
+	static float Sphere(const FVector3f& p, float radius);
 };
 struct DUALCONTOURINGTERRAIN_API SDFOp
 {

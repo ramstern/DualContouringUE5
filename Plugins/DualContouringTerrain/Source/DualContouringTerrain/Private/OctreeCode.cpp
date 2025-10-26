@@ -81,7 +81,7 @@ void UOctreeCode::ConstructLeafNode(OctreeNode* node, const FVector3f& node_p, c
 
 		if (!node->children[this_idx])
 		{
-			node->children[this_idx] = MakeUnique<OctreeNode>();
+			node->children[this_idx] = MakeUniqueForOverwrite<OctreeNode>();
 			//OctreeNode* new_node = new OctreeNode();
 			node->children[this_idx]->depth = node->depth + 1;
 			node->children[this_idx]->center = node->center + child_offsets[this_idx] * node->size * 0.25f;
@@ -110,6 +110,8 @@ void UOctreeCode::ConstructLeafNode(OctreeNode* node, const FVector3f& node_p, c
 
 	//UE_ASSUME(edge_count != 0);
 	FVector3f& vert_normal = node->leaf_data.normal;
+	vert_normal = FVector3f(0.f);
+
 	quadric3& vox_pq = node->leaf_data.qef;
 
 	const FVector3f node_center = node->center;
@@ -214,12 +216,11 @@ void UOctreeCode::ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node
 
 		if (!node->children[this_idx])
 		{
-			node->children[this_idx] = MakeUnique<OctreeNode>();
+			node->children[this_idx] = MakeUniqueForOverwrite<OctreeNode>();
 			//OctreeNode* new_node = new OctreeNode();
 			node->children[this_idx]->depth = node->depth + 1;
 			node->children[this_idx]->center = node->center + child_offsets[this_idx] * node->size * 0.25f;
 			node->children[this_idx]->size = node->size * 0.5f;
-
 		}
 
 		node = node->children[this_idx].Get();
@@ -243,6 +244,7 @@ void UOctreeCode::ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node
 
 	//UE_ASSUME(edge_count != 0);
 	FVector3f& vert_normal = node->leaf_data.normal;
+	vert_normal = FVector3f(0.f);
 	quadric3& vox_pq = node->leaf_data.qef;
 
 	const FVector3f node_center = node->center;
@@ -394,13 +396,13 @@ StitchOctreeNode* UOctreeCode::ConstructSeamOctree(const TArray<OctreeNode*, TIn
 //};
 
 
-OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise)
+TUniquePtr <OctreeNode> UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
 #endif
 
-	OctreeNode* root = new OctreeNode();
+	TUniquePtr<OctreeNode> root = MakeUniqueForOverwrite<OctreeNode>();
 	root->center = center;
 	root->depth = 0;
 	root->size = size;
@@ -457,7 +459,7 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 
 				if(corners != 255 && corners != 0)
 				{
-					ConstructLeafNode(root, world_pos, corner_densities, corners, settings_context);
+					ConstructLeafNode(root.Get(), world_pos, corner_densities, corners, settings_context);
 				}
 			}
 		}
@@ -465,19 +467,19 @@ OctreeNode* UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeS
 	}
 	//ConstructChildNodes(root, size, noise, root_min, );
 
-	if(settings_context.simplify) SimplifyOctree(root, settings_context.simplify_threshold);
+	if(settings_context.simplify) SimplifyOctree(root.Get(), settings_context.simplify_threshold);
 
 	return root;
 }
 
-OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops)
+TUniquePtr<OctreeNode> UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
 #endif
 
 	//possible replace with uniqueptr
-	OctreeNode* root = new OctreeNode();
+	TUniquePtr<OctreeNode> root = MakeUniqueForOverwrite<OctreeNode>();
 	root->center = center;
 	root->depth = 0;
 	root->size = size;
@@ -534,7 +536,7 @@ OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const Octre
 
 						if (corners != 255 && corners != 0)
 						{
-							ConstructLeafNode_Edit(root, world_pos, corner_densities, corners, settings_context, sdf_ops);
+							ConstructLeafNode_Edit(root.Get(), world_pos, corner_densities, corners, settings_context, sdf_ops);
 						}
 					}
 				}
@@ -542,7 +544,7 @@ OctreeNode* UOctreeCode::RebuildOctree(FVector3f center, float size, const Octre
 	}
 	//ConstructChildNodes(root, size, noise, root_min, );
 
-	if (settings_context.simplify) SimplifyOctree(root, settings_context.simplify_threshold);
+	if (settings_context.simplify) SimplifyOctree(root.Get(), settings_context.simplify_threshold);
 
 	return root;
 }
@@ -1351,19 +1353,24 @@ FVector3f UOctreeCode::FDMGetNormal_SDF(const FVector3f& at_point, float h, int3
 
 			FVector3f local_pos = pos - (sdf_op.position*0.01f);
 			
+			float sdf_val;
+			switch (sdf_op.sdf_type)
+			{
+			case SDFOp::SDFType::Box:
+				sdf_val = SDF::Box(local_pos, ((sdf_op.bounds_size * 0.5f) * 0.01f));
+				break;
+			case SDFOp::SDFType::Sphere:
+				sdf_val = SDF::Sphere(local_pos, (sdf_op.bounds_size.X * 0.5f) * 0.01f);
+				break;
+			}
+
 			switch (sdf_op.mod_type)
 			{
 			case SDFOp::ModType::Subtract:
-				switch (sdf_op.sdf_type)
-				{
-				case SDFOp::SDFType::Box:
-					noise[i] = FMath::Max(noise[i], -SDF::Box(local_pos, ((sdf_op.bounds_size * 0.5f) * 0.01f)));
-					break;
-				case SDFOp::SDFType::Sphere:
-					break;
-				}
+				noise[i] = FMath::Max(noise[i], -sdf_val);
 				break;
 			case SDFOp::ModType::Union:
+				noise[i] = FMath::Min(noise[i], sdf_val);
 				break;
 			}
 		}

@@ -51,9 +51,9 @@ void ADCTestPawn::RaycastOnce()
 	FHitResult hit_result;
 	const bool hit = DoViewRaycast(hit_result);
 
-	SDFOp box_sdf(FVector3f(hit_result.ImpactPoint), FVector3f(200.f));
-	box_sdf.sdf_type = SDFOp::Sphere;
-	box_sdf.mod_type = SDFOp::Union;
+	FSDFOp box_sdf(FVector3f(hit_result.ImpactPoint), FVector3f(200.f));
+	box_sdf.sdf_type = SDFType::Box;
+	box_sdf.mod_type = ModType::Subtract;
 
 	if(hit) chunk_provider->ModifyOperation(box_sdf);
 }

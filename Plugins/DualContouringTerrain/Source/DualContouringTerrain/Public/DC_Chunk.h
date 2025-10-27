@@ -36,6 +36,8 @@ struct DUALCONTOURINGTERRAIN_API ChunkPolygonizeResult
 {
 	TFuture<ERealtimeMeshProxyUpdateStatus> mesh_future;
 	TFuture<ERealtimeMeshProxyUpdateStatus> collision_future;
+	FIntVector3 chunk_coord;
+	bool rm_aborted = false;
 
 	ChunkPolygonizeResult() = default;
 };
@@ -58,9 +60,10 @@ public:
 	TUniquePtr<struct OctreeNode> root = nullptr;
 	FVector3f center;
 	bool newly_created = false;
+	bool had_section_built = true;
 	uint8 ping_counter = 0;
 	URealtimeMeshSimple* mesh = nullptr;
 	TArray<float> noise_field;
-	TArray<SDFOp> sdf_ops;
+	TArray<FSDFOp> sdf_ops;
 };
 

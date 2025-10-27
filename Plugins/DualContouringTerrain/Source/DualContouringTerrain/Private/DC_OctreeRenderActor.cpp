@@ -22,6 +22,8 @@ bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh,
 {
 	//check(IsInGameThread());
 
+	//UE_LOG(LogTemp, Display, TEXT(" chunk section count: %i, rmcs count: %i"), chunks_with_sections.Num(), rmcs.Num());
+
 	//no available rmc's, create and add new one
 	if(reuse_indices.IsEmpty())
 	{
@@ -57,9 +59,12 @@ bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh,
 	int32 idx;
 	reuse_indices.Dequeue(idx);
 
+	bool had_section_built = chunks_with_sections.FindAndRemoveChecked(idx);
+
 	URealtimeMeshComponent* rmc = rmcs[idx];
 	out_mesh = rmc->GetRealtimeMeshAs<URealtimeMeshSimple>();
 
+	if(!had_section_built) return true;
 	return false;	
 }
 
@@ -74,13 +79,16 @@ void ADC_OctreeRenderActor::DestroyAllRMCs()
 		rmcs[i]->DestroyComponent();
 	}
 	rmcs.Empty();
+	chunks_with_sections.Empty();
 	reuse_indices.Empty();
 }
 
-void ADC_OctreeRenderActor::ReleaseRMC(URealtimeMeshComponent*& component)
+void ADC_OctreeRenderActor::ReleaseRMC(URealtimeMeshComponent*& component, bool had_section_built)
 {
 	int32 idx = rmcs.Find(component);
 	reuse_indices.Enqueue(idx);
+
+	chunks_with_sections.Add(idx, had_section_built);
 
 	component = nullptr;
 }

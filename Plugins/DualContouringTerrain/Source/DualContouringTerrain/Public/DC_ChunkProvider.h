@@ -23,7 +23,8 @@ class DUALCONTOURINGTERRAIN_API UChunkProvider : public UTickableWorldSubsystem
 	GENERATED_BODY()
 	
 public:
-	void ModifyOperation(const SDFOp& sdf_operation);
+	UFUNCTION(BlueprintCallable)
+	void ModifyOperation(const FSDFOp& sdf_operation);
 
 private:
 	// USubsystem implementation Begin
@@ -56,7 +57,7 @@ private:
 		TQueue<TTuple<FIntVector3, PolygonizeTaskArg>> chunk_polygonize_jobs;
 		TArray<TFuture<ChunkPolygonizeResult>> chunk_polygonize_tasks;
 
-		TQueue<SDFOp> modify_operations;
+		TQueue<FSDFOp> modify_operations;
 
 		int32 dim;
 		FIntVector min_coord;
@@ -82,7 +83,7 @@ private:
 	TArray<FIntVector3> GetChunkArea(FIntVector3 around);
 
 	TArray<float> BuildNoiseField(const FVector3f& center, float size, int32 max_depth, int32 noise_seed);
-	void EditNoiseField(TArray<float>& noise_field, const FVector3f& center, float size, int32 max_depth, const SDFOp& sdf_op);
+	void EditNoiseField(TArray<float>& noise_field, const FVector3f& center, float size, int32 max_depth, const FSDFOp& sdf_op);
 
 	//calls upon octree manager to mesh this chunk.
 	void MeshChunk(const FIntVector3& coords, PolygonizeTaskArg task_arg);
@@ -92,6 +93,10 @@ private:
 	bool IsSafeToModifyChunks();
 
  	void FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>>& seam_octants, bool negative_delta, const FIntVector3& chunk_coord, OctreeNode* root);
+
+	void DrainChunkBuildQueues();
+
+	void ReleaseChunkMesh(Chunk& chunk, bool had_section_built = true);
 
 	// try to get current render camera
 	FVector GetActiveCameraLocation();

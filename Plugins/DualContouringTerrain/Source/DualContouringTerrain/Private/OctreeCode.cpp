@@ -200,7 +200,7 @@ void UOctreeCode::ConstructLeafNode(OctreeNode* node, const FVector3f& node_p, c
 #endif
 }
 
-void UOctreeCode::ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context, const TArray<SDFOp>& sdf_ops)
+void UOctreeCode::ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context, const TArray<FSDFOp>& sdf_ops)
 {
 	//const unsigned int MAX_ZERO_CROSSINGS = 6;
 	const int8 max_depth = settings_context.max_depth;
@@ -396,7 +396,7 @@ StitchOctreeNode* UOctreeCode::ConstructSeamOctree(const TArray<OctreeNode*, TIn
 //};
 
 
-TUniquePtr <OctreeNode> UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise)
+TUniquePtr<OctreeNode> UOctreeCode::BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
@@ -414,6 +414,7 @@ TUniquePtr <OctreeNode> UOctreeCode::BuildOctree(FVector3f center, float size, c
 
 	const float iso_surface = settings_context.iso_surface;
 
+	bool has_data = false;
 	{
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctee_voxbuilding)
@@ -459,20 +460,22 @@ TUniquePtr <OctreeNode> UOctreeCode::BuildOctree(FVector3f center, float size, c
 
 				if(corners != 255 && corners != 0)
 				{
+					has_data = true;
 					ConstructLeafNode(root.Get(), world_pos, corner_densities, corners, settings_context);
 				}
 			}
 		}
 	}
 	}
-	//ConstructChildNodes(root, size, noise, root_min, );
+
+	if(!has_data) return nullptr;
 
 	if(settings_context.simplify) SimplifyOctree(root.Get(), settings_context.simplify_threshold);
 
 	return root;
 }
 
-TUniquePtr<OctreeNode> UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops)
+TUniquePtr<OctreeNode> UOctreeCode::RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<FSDFOp>& sdf_ops)
 {
 #if USE_NAMED_STATS
 	QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctree)
@@ -491,6 +494,7 @@ TUniquePtr<OctreeNode> UOctreeCode::RebuildOctree(FVector3f center, float size, 
 
 	const float iso_surface = settings_context.iso_surface;
 
+	bool has_data = false;
 	{
 #if USE_NAMED_STATS
 		QUICK_SCOPE_CYCLE_COUNTER(Stat_BuildOctee_voxbuilding)
@@ -536,6 +540,7 @@ TUniquePtr<OctreeNode> UOctreeCode::RebuildOctree(FVector3f center, float size, 
 
 						if (corners != 255 && corners != 0)
 						{
+							has_data = true;
 							ConstructLeafNode_Edit(root.Get(), world_pos, corner_densities, corners, settings_context, sdf_ops);
 						}
 					}
@@ -543,6 +548,7 @@ TUniquePtr<OctreeNode> UOctreeCode::RebuildOctree(FVector3f center, float size, 
 			}
 	}
 	//ConstructChildNodes(root, size, noise, root_min, );
+	if(!has_data) return nullptr;
 
 	if (settings_context.simplify) SimplifyOctree(root.Get(), settings_context.simplify_threshold);
 
@@ -1334,7 +1340,7 @@ FVector3f UOctreeCode::FDMGetNormal(const FVector3f& at_point, float h, int32 se
 	return normal.GetUnsafeNormal();
 }
 
-FVector3f UOctreeCode::FDMGetNormal_SDF(const FVector3f& at_point, float h, int32 seed, const TArray<SDFOp>& sdf_ops)
+FVector3f UOctreeCode::FDMGetNormal_SDF(const FVector3f& at_point, float h, int32 seed, const TArray<FSDFOp>& sdf_ops)
 {
 	//x, y, z axii order
 	const float x_positions[6] = { at_point.X + h,  at_point.X - h, at_point.X, at_point.X, at_point.X, at_point.X };
@@ -1349,27 +1355,27 @@ FVector3f UOctreeCode::FDMGetNormal_SDF(const FVector3f& at_point, float h, int3
 
 		for (int32 sdf_idx = 0; sdf_idx < sdf_ops.Num(); sdf_idx++)
 		{
-			const SDFOp& sdf_op = sdf_ops[sdf_idx];
+			const FSDFOp& sdf_op = sdf_ops[sdf_idx];
 
 			FVector3f local_pos = pos - (sdf_op.position*0.01f);
 			
 			float sdf_val;
 			switch (sdf_op.sdf_type)
 			{
-			case SDFOp::SDFType::Box:
+			case SDFType::Box:
 				sdf_val = SDF::Box(local_pos, ((sdf_op.bounds_size * 0.5f) * 0.01f));
 				break;
-			case SDFOp::SDFType::Sphere:
+			case SDFType::Sphere:
 				sdf_val = SDF::Sphere(local_pos, (sdf_op.bounds_size.X * 0.5f) * 0.01f);
 				break;
 			}
 
 			switch (sdf_op.mod_type)
 			{
-			case SDFOp::ModType::Subtract:
+			case ModType::Subtract:
 				noise[i] = FMath::Max(noise[i], -sdf_val);
 				break;
-			case SDFOp::ModType::Union:
+			case ModType::Union:
 				noise[i] = FMath::Min(noise[i], sdf_val);
 				break;
 			}

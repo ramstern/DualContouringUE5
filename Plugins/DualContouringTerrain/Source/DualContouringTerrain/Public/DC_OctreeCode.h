@@ -36,7 +36,7 @@ public:
 	
 	// builds an octree and returns it
 	static TUniquePtr<OctreeNode> BuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise);
-	static TUniquePtr<OctreeNode> RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<SDFOp>& sdf_ops);
+	static TUniquePtr<OctreeNode> RebuildOctree(FVector3f center, float size, const OctreeSettingsMultithreadContext& settings_context, const TArray<float>& noise, const TArray<FSDFOp>& sdf_ops);
 	
 	//get octree node from position p inside starting (parent) node, at depth depth.
 	TUniquePtr<OctreeNode>* GetNodeFromPositionDepth(OctreeNode* start, FVector3f p, int8 depth) const;
@@ -56,7 +56,7 @@ public:
 private:
 
 	static void ConstructLeafNode(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context);
-	static void ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context, const TArray<SDFOp>& sdf_ops);
+	static void ConstructLeafNode_Edit(OctreeNode* node, const FVector3f& node_p, const float* corner_densities, uint8 corners, const OctreeSettingsMultithreadContext& settings_context, const TArray<FSDFOp>& sdf_ops);
 
 	static StitchOctreeNode* ConstructSeamOctree(const TArray<OctreeNode*, TInlineAllocator<8>>& seam_nodes, bool negative_delta, MeshBuilder& builder);
 
@@ -93,7 +93,7 @@ private:
 
 	// get normal via fdm 
 	static FVector3f FDMGetNormal(const FVector3f& at_point, float h, int32 seed);
-	static FVector3f FDMGetNormal_SDF(const FVector3f& at_point, float h, int32 seed, const TArray<SDFOp>& sdf_ops);
+	static FVector3f FDMGetNormal_SDF(const FVector3f& at_point, float h, int32 seed, const TArray<FSDFOp>& sdf_ops);
 
 	// get child index containing p from node position
 	static FORCEINLINE uint8 GetChildNodeFromPosition(const FVector3f& p, const FVector3f& node_center)

@@ -43,7 +43,7 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 	Params.bNoFail = true;
 
 #if WITH_EDITOR
-	//Params.bHideFromSceneOutliner = true;
+	Params.bHideFromSceneOutliner = true;
 #endif
 
 	ADC_OctreeRenderActor* created_render_actor = GetWorld()->SpawnActor<ADC_OctreeRenderActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
@@ -63,6 +63,8 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 
 		render_actor = created_render_actor;
 	}
+
+
 
 	Init(false);
 }
@@ -228,7 +230,7 @@ TArray<float> UChunkProvider::BuildNoiseField(const FVector3f& center, float siz
 	return noise;
 }
 
-void UChunkProvider::EditNoiseField(TArray<float>& noise, const FVector3f& center, float size, int32 max_depth, const SDFOp& sdf_op)
+void UChunkProvider::EditNoiseField(TArray<float>& noise, const FVector3f& center, float size, int32 max_depth, const FSDFOp& sdf_op)
 {
 	int32 dim = UOctreeCode::GetDim(max_depth) + 1;
 
@@ -263,20 +265,20 @@ void UChunkProvider::EditNoiseField(TArray<float>& noise, const FVector3f& cente
 		float sdf_val;
 		switch (sdf_op.sdf_type)
 		{
-		case SDFOp::SDFType::Box:
+		case SDFType::Box:
 			sdf_val = SDF::Box(local_pos, ((sdf_op.bounds_size * 0.5f) * 0.01f));
 			break;
-		case SDFOp::SDFType::Sphere:
+		case SDFType::Sphere:
 			sdf_val = SDF::Sphere(local_pos, (sdf_op.bounds_size.X*0.5f) * 0.01f);
 			break;
 		}
 
 		switch (sdf_op.mod_type)
 		{
-		case SDFOp::ModType::Subtract:
+		case ModType::Subtract:
 			noise[i] = FMath::Max(noise[i], -sdf_val);
 			break;
-		case SDFOp::ModType::Union:
+		case ModType::Union:
 			noise[i] = FMath::Min(noise[i], sdf_val);
 			break;
 		}
@@ -453,6 +455,317 @@ void UChunkProvider::FillSeamOctreeNodes(TArray<OctreeNode*, TInlineAllocator<8>
 	}
 }
 
+void UChunkProvider::DrainChunkBuildQueues()
+{
+	const uint32 per_frame_polygonize_dispatch_count = 10;
+	uint32 dispatch_counter = 0;
+
+	//latent creation and polygonization
+	while (!chunk_grid.chunk_creation_jobs.IsEmpty())
+	{
+		TTuple<FIntVector, CreationTaskArg> tuple;
+		chunk_grid.chunk_creation_jobs.Dequeue(tuple);
+
+		Chunk& chunk = chunk_grid.GetMutable(tuple.Key);
+
+		FVector3f chunk_center = chunk.center;
+
+		OctreeSettingsMultithreadContext settings_context;
+		settings_context = *GetDefault<UOctreeSettings>();
+
+		float size = chunk_settings->chunk_size;
+
+		CreationTaskArg task_arg = tuple.Value;
+
+		if (task_arg == CreationTaskArg::ModifyOperation)
+		{
+			FSDFOp op;
+			chunk_grid.modify_operations.Dequeue(op);
+
+			chunk_grid.GetMutable(tuple.Key).sdf_ops.Add(op);
+
+			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
+				{
+					ChunkCreationResult result;
+					result.chunk_coord = coord;
+
+					EditNoiseField(noise_field, chunk_center, size, settings_context.max_depth, op);
+
+					result.created_root = UOctreeCode::RebuildOctree(chunk_center, size, settings_context, noise_field, sdf_ops);
+					result.task_arg = task_arg;
+
+					return result;
+				}));
+		}
+		else
+		{
+			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg]() -> ChunkCreationResult
+				{
+					ChunkCreationResult result;
+					result.chunk_coord = coord;
+					result.noise_field = BuildNoiseField(chunk_center, size, settings_context.max_depth, settings_context.seed);
+					result.created_root = UOctreeCode::BuildOctree(chunk_center, size, settings_context, result.noise_field);
+					result.task_arg = task_arg;
+
+					return result;
+				}));
+		}
+	}
+	for (int32 i = 0; i < chunk_grid.chunk_creation_tasks.Num(); i++)
+	{
+		auto& result = chunk_grid.chunk_creation_tasks[i];
+		if (result.IsReady())
+		{
+			ChunkCreationResult creation_result = result.Consume();
+
+			Chunk& chunk = chunk_grid.GetMutable(creation_result.chunk_coord);
+			chunk.root = MoveTemp(creation_result.created_root);
+			chunk.newly_created = creation_result.task_arg == CreationTaskArg::NewlyCreated;
+
+			if (creation_result.task_arg != CreationTaskArg::ModifyOperation)
+			{
+				chunk.noise_field = MoveTemp(creation_result.noise_field);
+			}
+
+			temp_created_chunks.Add(creation_result.chunk_coord);
+
+			chunk_grid.chunk_creation_tasks.RemoveAt(i);
+			i--;
+		}
+	}
+	if (chunk_grid.chunk_creation_tasks.IsEmpty())
+	{
+		while (!chunk_grid.chunk_polygonize_jobs.IsEmpty() && dispatch_counter < per_frame_polygonize_dispatch_count)
+		{
+			TTuple<FIntVector3, PolygonizeTaskArg> tuple;
+			chunk_grid.chunk_polygonize_jobs.Dequeue(tuple);
+
+			Chunk& chunk = chunk_grid.GetMutable(tuple.Key);
+			FIntVector3 coord = tuple.Key;
+			PolygonizeTaskArg task_arg = tuple.Value;
+
+			if(chunk.root.IsValid())
+			{
+				bool edge_case = false;
+				if (task_arg != PolygonizeTaskArg::Area)
+				{
+					if (task_arg == PolygonizeTaskArg::RebuildAllSeams) edge_case = true;
+					else if (task_arg == PolygonizeTaskArg::SlabNegative)
+					{
+						Chunk* back;
+						Chunk* down;
+						Chunk* left;
+
+						if (temp_created_chunks.Contains(coord + FIntVector3(-1, 0, 0)))
+						{
+							back = nullptr;
+						}
+						else
+						{
+							back = chunk_grid.TryGet(coord + FIntVector3(-1, 0, 0));
+						}
+
+						if (temp_created_chunks.Contains(coord + FIntVector3(0, 0, -1)))
+						{
+							down = nullptr;
+						}
+						else
+						{
+							down = chunk_grid.TryGet(coord + FIntVector3(0, 0, -1));
+						}
+
+						if (temp_created_chunks.Contains(coord + FIntVector3(0, -1, 0)))
+						{
+							left = nullptr;
+						}
+						else
+						{
+							left = chunk_grid.TryGet(coord + FIntVector3(0, -1, 0));
+						}
+
+						edge_case = back || down || left;
+					}
+					else
+					{
+						Chunk* front;
+						Chunk* up;
+						Chunk* right;
+
+						if (temp_created_chunks.Contains(coord + FIntVector3(1, 0, 0)))
+						{
+							front = nullptr;
+						}
+						else
+						{
+							front = chunk_grid.TryGet(coord + FIntVector3(1, 0, 0));
+						}
+
+						if (temp_created_chunks.Contains(coord + FIntVector3(0, 0, 1)))
+						{
+							up = nullptr;
+						}
+						else
+						{
+							up = chunk_grid.TryGet(coord + FIntVector3(0, 0, 1));
+						}
+
+						if (temp_created_chunks.Contains(coord + FIntVector3(0, 1, 0)))
+						{
+							right = nullptr;
+						}
+						else
+						{
+							right = chunk_grid.TryGet(coord + FIntVector3(0, 1, 0));
+						}
+
+						edge_case = front || up || right;
+					}
+				}
+
+				bool negative_delta = (task_arg == PolygonizeTaskArg::SlabNegative);
+
+				OctreeNode* root = chunk.root.Get();
+				bool newly_created = chunk.newly_created;
+
+				TArray<OctreeNode*, TInlineAllocator<8>> seam_octants;
+				seam_octants.SetNumUninitialized(8);
+				FillSeamOctreeNodes(seam_octants, negative_delta, coord, root);
+
+				URealtimeMeshSimple* chunk_mesh = chunk.mesh;
+
+				if (edge_case)
+				{
+					TArray<OctreeNode*, TInlineAllocator<8>> ec_seam_octants;
+					ec_seam_octants.SetNumUninitialized(8);
+					FillSeamOctreeNodes(ec_seam_octants, !negative_delta, coord, root);
+
+					chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
+						[this,coord, negative_delta, seam_octants, ec_seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
+						{
+							ChunkPolygonizeResult result;
+							result.chunk_coord = coord;
+
+							FRealtimeMeshSectionGroupKey mesh_group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
+							RealtimeMesh::FRealtimeMeshStreamSet stream_set;
+
+							stream_set = UOctreeCode::PolygonizeOctree(seam_octants, ec_seam_octants, negative_delta);
+							FRealtimeMeshStreamKey key = stream_set.GetStreamKeys().Get(FSetElementId::FromInteger(0));
+							//create / update mesh section of chunk
+							int32 idx_num = stream_set.Find(key)->Num();
+							if (idx_num < 3 || !chunk_mesh)
+							{
+								result.rm_aborted = true;
+							}
+							else
+							{
+								if (newly_created)
+								{
+									result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
+								}
+								else
+								{
+									result.mesh_future = chunk_mesh->UpdateSectionGroup(mesh_group_key, MoveTemp(stream_set));
+								}
+
+								FRealtimeMeshSectionKey section_key = FRealtimeMeshSectionKey::Create(mesh_group_key, FName("Section_PolyGroup"));
+								result.collision_future = chunk_mesh->UpdateSectionConfig(section_key, FRealtimeMeshSectionConfig(), true);
+							}
+
+							return result;
+						}));
+
+				}
+				else
+				{
+					chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
+						[this, coord, negative_delta, seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
+						{
+							ChunkPolygonizeResult result;
+							result.chunk_coord = coord;
+
+							FRealtimeMeshSectionGroupKey mesh_group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
+							RealtimeMesh::FRealtimeMeshStreamSet stream_set;
+
+							stream_set = UOctreeCode::PolygonizeOctree(seam_octants, negative_delta);
+							FRealtimeMeshStreamKey key = stream_set.GetStreamKeys().Get(FSetElementId::FromInteger(1));
+							
+							int32 idx_num = stream_set.Find(key)->Num();
+							if(idx_num < 3) 
+							{
+								result.rm_aborted = true;
+							}
+							else 
+							{
+								//create / update mesh section of chunk
+								if (newly_created)
+								{
+									result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
+								}
+								else
+								{
+									result.mesh_future = chunk_mesh->UpdateSectionGroup(mesh_group_key, MoveTemp(stream_set));
+								}
+
+
+								FRealtimeMeshSectionKey section_key = FRealtimeMeshSectionKey::Create(mesh_group_key, FName("Section_PolyGroup"));
+								result.collision_future = chunk_mesh->UpdateSectionConfig(section_key, FRealtimeMeshSectionConfig(), true);
+
+							}
+							
+							
+							
+							return result;
+						}));
+				}
+
+				dispatch_counter++;
+			}
+			else 
+			{
+				ReleaseChunkMesh(chunk, false);
+				chunk.had_section_built = false;
+			}
+		}
+	}
+	for (int32 i = 0; i < chunk_grid.chunk_polygonize_tasks.Num(); i++)
+	{
+		auto& result = chunk_grid.chunk_polygonize_tasks[i];
+		if (result.IsReady())
+		{
+			const ChunkPolygonizeResult& polygonize_result = result.Get();
+			if(polygonize_result.rm_aborted)
+			{
+				Chunk& chunk = chunk_grid.GetMutable(polygonize_result.chunk_coord);
+				
+				ReleaseChunkMesh(chunk, false);
+
+				chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
+				i--;
+			}
+			else if(polygonize_result.collision_future.IsReady() && polygonize_result.mesh_future.IsReady())
+			{
+				result.GetMutable().collision_future.Consume();
+				ERealtimeMeshProxyUpdateStatus status = result.GetMutable().mesh_future.Consume();
+
+				result.Consume();
+
+				chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
+				i--;
+			}
+		}
+	}
+
+}
+
+void UChunkProvider::ReleaseChunkMesh(Chunk& chunk, bool had_section_built)
+{
+	if(!chunk.mesh) return;
+
+	auto rmc = static_cast<URealtimeMeshComponent*>(chunk.mesh->GetOuter());
+	render_actor->ReleaseRMC(rmc, had_section_built);
+	chunk.mesh = nullptr;
+}
+
 FVector UChunkProvider::GetActiveCameraLocation()
 {
 	//return test_follow_actor->GetActorLocation();
@@ -489,7 +802,7 @@ FVector UChunkProvider::GetActiveCameraLocation()
 	#endif
 }
 
-void UChunkProvider::ModifyOperation(const SDFOp& sdf_operation)
+void UChunkProvider::ModifyOperation(const FSDFOp& sdf_operation)
 {
 	if(!IsSafeToModifyChunks()) return;
 
@@ -586,253 +899,7 @@ void UChunkProvider::Tick(float DeltaTime)
 
 	if(chunk_settings->stop_chunk_loading) return;
 
-	//latent creation and polygonization
-	while(!chunk_grid.chunk_creation_jobs.IsEmpty())
-	{
-		TTuple<FIntVector, CreationTaskArg> tuple;
-		chunk_grid.chunk_creation_jobs.Dequeue(tuple);
-
-		Chunk& chunk = chunk_grid.GetMutable(tuple.Key);
-
-		FVector3f chunk_center = chunk.center;
-
-		OctreeSettingsMultithreadContext settings_context;
-		settings_context = *GetDefault<UOctreeSettings>();
-
-		float size = chunk_settings->chunk_size;
-
-		CreationTaskArg task_arg = tuple.Value;
-
-		if(task_arg == CreationTaskArg::ModifyOperation) 
-		{
-			SDFOp op;
-			chunk_grid.modify_operations.Dequeue(op);
-
-			chunk_grid.GetMutable(tuple.Key).sdf_ops.Add(op);
-
-			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
-			{
-				ChunkCreationResult result;
-				result.chunk_coord = coord;
-
-				EditNoiseField(noise_field, chunk_center, size, settings_context.max_depth, op);
-
-				result.created_root = UOctreeCode::RebuildOctree(chunk_center, size, settings_context, noise_field, sdf_ops);
-				result.task_arg = task_arg;
-				
-				return result;
-			}));
-		}
-		else 
-		{
-			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg]() -> ChunkCreationResult
-			{
-				ChunkCreationResult result;
-				result.chunk_coord = coord;
-				result.noise_field = BuildNoiseField(chunk_center, size, settings_context.max_depth, settings_context.seed);
-				result.created_root = UOctreeCode::BuildOctree(chunk_center, size, settings_context, result.noise_field);
-				result.task_arg = task_arg/*(task_arg == CreationTaskArg::NewlyCreated)*/;
-				
-				return result;
-			}));
-		}
-	}
-	for (int32 i = 0; i < chunk_grid.chunk_creation_tasks.Num(); i++)
-	{
-		auto& result = chunk_grid.chunk_creation_tasks[i];
-		if(result.IsReady())
-		{
-			ChunkCreationResult creation_result = result.Consume();
-
-			Chunk& chunk = chunk_grid.GetMutable(creation_result.chunk_coord);
-			chunk.root = MoveTemp(creation_result.created_root);
-			chunk.newly_created = creation_result.task_arg == CreationTaskArg::NewlyCreated;
-
-			if(creation_result.task_arg != CreationTaskArg::ModifyOperation)
-			{
-				chunk.noise_field = MoveTemp(creation_result.noise_field);
-			}
-
-			temp_created_chunks.Add(creation_result.chunk_coord);
-
-			chunk_grid.chunk_creation_tasks.RemoveAt(i);
-			i--;
-		}
-	}
-	if(chunk_grid.chunk_creation_tasks.IsEmpty())
-	{
-		while(!chunk_grid.chunk_polygonize_jobs.IsEmpty())
-		{
-			TTuple<FIntVector3, PolygonizeTaskArg> tuple;
-			chunk_grid.chunk_polygonize_jobs.Dequeue(tuple);
-
-			const Chunk& chunk = chunk_grid.Get(tuple.Key);
-			FIntVector3 coord = tuple.Key;
-			PolygonizeTaskArg task_arg = tuple.Value;
-
-			bool edge_case = false;
-			if(task_arg != PolygonizeTaskArg::Area)
-			{
-				if(task_arg == PolygonizeTaskArg::RebuildAllSeams) edge_case = true;
-				else if (task_arg == PolygonizeTaskArg::SlabNegative)
-				{
-					Chunk* back;
-					Chunk* down;
-					Chunk* left;
-
-					if(temp_created_chunks.Contains(coord + FIntVector3(-1,0,0)))
-					{
-						back = nullptr;
-					}
-					else 
-					{
-						back = chunk_grid.TryGet(coord + FIntVector3(-1, 0, 0));
-					}
-
-					if (temp_created_chunks.Contains(coord + FIntVector3(0, 0, -1)))
-					{
-						down = nullptr;
-					}
-					else
-					{
-						down = chunk_grid.TryGet(coord + FIntVector3(0, 0, -1));
-					}
-
-					if (temp_created_chunks.Contains(coord + FIntVector3(0, -1, 0)))
-					{
-						left = nullptr;
-					}
-					else
-					{
-						left = chunk_grid.TryGet(coord + FIntVector3(0, -1, 0));
-					}
-
-					edge_case = back || down || left;
-				}
-				else
-				{
-					Chunk* front;
-					Chunk* up;
-					Chunk* right;
-
-					if (temp_created_chunks.Contains(coord + FIntVector3(1, 0, 0)))
-					{
-						front = nullptr;
-					}
-					else
-					{
-						front = chunk_grid.TryGet(coord + FIntVector3(1, 0, 0));
-					}
-
-					if (temp_created_chunks.Contains(coord + FIntVector3(0, 0, 1)))
-					{
-						up = nullptr;
-					}
-					else
-					{
-						up = chunk_grid.TryGet(coord + FIntVector3(0, 0, 1));
-					}
-
-					if (temp_created_chunks.Contains(coord + FIntVector3(0, 1, 0)))
-					{
-						right = nullptr;
-					}
-					else
-					{
-						right = chunk_grid.TryGet(coord + FIntVector3(0, 1, 0));
-					}
-
-					edge_case = front || up || right;
-				}
-			}
-			
-			bool negative_delta = (task_arg == PolygonizeTaskArg::SlabNegative);
-
-			OctreeNode* root = chunk.root.Get();
-			bool newly_created = chunk.newly_created;
-
-			TArray<OctreeNode*, TInlineAllocator<8>> seam_octants;
-			seam_octants.SetNumUninitialized(8);
-			FillSeamOctreeNodes(seam_octants, negative_delta, coord, root);
-
-			URealtimeMeshSimple* chunk_mesh = chunk.mesh;
-
-			if(edge_case)
-			{
-				TArray<OctreeNode*, TInlineAllocator<8>> ec_seam_octants;
-				ec_seam_octants.SetNumUninitialized(8);
-				FillSeamOctreeNodes(ec_seam_octants, !negative_delta, coord, root);
-
-				chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
-			[this, negative_delta, seam_octants, ec_seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
-				{
-					ChunkPolygonizeResult result;
-
-					FRealtimeMeshSectionGroupKey mesh_group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
-					RealtimeMesh::FRealtimeMeshStreamSet stream_set;
-
-					stream_set = UOctreeCode::PolygonizeOctree(seam_octants, ec_seam_octants, negative_delta);
-
-					//create / update mesh section of chunk
-					if(newly_created)
-					{
-						result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
-					}
-					else 
-					{
-						result.mesh_future = chunk_mesh->UpdateSectionGroup(mesh_group_key, MoveTemp(stream_set));
-					}
-
-					FRealtimeMeshSectionKey section_key = FRealtimeMeshSectionKey::Create(mesh_group_key, FName("Section_PolyGroup"));
-					result.collision_future = chunk_mesh->UpdateSectionConfig(section_key, FRealtimeMeshSectionConfig(), true);
-
-					return result;
-				}));
-
-			}
-			else 
-			{
-				chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
-			[this, negative_delta, seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
-				{
-					ChunkPolygonizeResult result;
-
-					FRealtimeMeshSectionGroupKey mesh_group_key = FRealtimeMeshSectionGroupKey::Create(0, FName("DC_Mesh"));
-					RealtimeMesh::FRealtimeMeshStreamSet stream_set;
-
-					stream_set = UOctreeCode::PolygonizeOctree(seam_octants, negative_delta);
-
-					//create / update mesh section of chunk
-					if(newly_created)
-					{
-						result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
-					}
-					else 
-					{
-						result.mesh_future = chunk_mesh->UpdateSectionGroup(mesh_group_key, MoveTemp(stream_set));
-					}
-
-					FRealtimeMeshSectionKey section_key = FRealtimeMeshSectionKey::Create(mesh_group_key, FName("Section_PolyGroup"));
-					result.collision_future = chunk_mesh->UpdateSectionConfig(section_key, FRealtimeMeshSectionConfig(), true);
-
-					return result;
-				}));
-			}
-		}
-	}
-	for (int32 i = 0; i < chunk_grid.chunk_polygonize_tasks.Num(); i++)
-	{
-		auto& result = chunk_grid.chunk_polygonize_tasks[i];
-		if (result.IsReady() && result.Get().collision_future.IsReady() && result.Get().mesh_future.IsReady())
-		{
-			result.GetMutable().collision_future.Consume();
-			result.GetMutable().mesh_future.Consume();
-			result.Consume();
-
-			chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
-			i--;
-		}
-	}
+	DrainChunkBuildQueues();
 
 	if(IsSafeToModifyChunks())
 	{
@@ -879,10 +946,9 @@ void UChunkProvider::Tick(float DeltaTime)
 
 				if (chunk.ping_counter >= chunk_settings->chunk_ping_deletion_at)
 				{
-					const Chunk& removed_chunk = chunk_grid.Get(pair.Key);
+					Chunk& removed_chunk = chunk_grid.GetMutable(pair.Key);
 
-					auto rmc = static_cast<URealtimeMeshComponent*>(removed_chunk.mesh->GetOuter());
-					render_actor->ReleaseRMC(rmc);
+					ReleaseChunkMesh(removed_chunk, chunk.had_section_built);
 
 					cleanup_chunks.Add(pair.Key);
 				}

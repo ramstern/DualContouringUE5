@@ -30,7 +30,7 @@ void UNoiseDataGenerator::Initialize(FSubsystemCollectionBase& Collection)
     finalizer_scale->SetScaling(6.f);
 
     //checkerboard test: Av8=
-    GeneratorFromNoiseToolString(FString("Bv8="));
+    GeneratorFromNoiseToolString(FString("BgQ="));
 
     finalizer_scale->SetSource(generator);
     finalizer_offset->SetSource(finalizer_scale);

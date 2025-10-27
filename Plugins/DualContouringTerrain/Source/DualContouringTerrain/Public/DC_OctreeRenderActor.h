@@ -24,7 +24,7 @@ public:
 
 	void DestroyAllRMCs();
 
-	void ReleaseRMC(URealtimeMeshComponent*& component);
+	void ReleaseRMC(URealtimeMeshComponent*& component, bool had_section_built = true);
 
 protected:
 	// Called when the game starts or when spawned
@@ -32,7 +32,7 @@ protected:
 
 	TArray<URealtimeMeshComponent*> rmcs;
 	TQueue<int32> reuse_indices;
-
+	TMap<int32, bool> chunks_with_sections;
 public:	
 	virtual void Destroyed() override;
 

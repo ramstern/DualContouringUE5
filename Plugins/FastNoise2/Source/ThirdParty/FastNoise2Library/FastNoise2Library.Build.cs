@@ -19,7 +19,7 @@ public class FastNoise2Library : ModuleRules
 
             // Add the import library
             PublicDefinitions.Add("FASTNOISE_STATIC_LIB=1");
-            PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "x64", LibConfigFolder, "FastSIMD.lib"));
+            //PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "x64", LibConfigFolder, "FastSIMD.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "x64", LibConfigFolder, TargetName + ".lib"));
         }
 		else if (Target.Platform == UnrealTargetPlatform.Mac)

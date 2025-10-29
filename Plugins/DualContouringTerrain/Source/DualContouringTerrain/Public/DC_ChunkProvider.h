@@ -96,7 +96,7 @@ private:
 
 	void DrainChunkBuildQueues();
 
-	void ReleaseChunkMesh(Chunk& chunk, bool had_section_built = true);
+	void ReleaseChunkMesh(Chunk& chunk);
 
 	// try to get current render camera
 	FVector GetActiveCameraLocation();
@@ -107,7 +107,6 @@ private:
 
 	// actor for rendering the octree mesh
 	ADC_OctreeRenderActor* render_actor = nullptr;
-	//AActor* test_follow_actor = nullptr;
 	bool build_initial_area = false;
 	TSet<FIntVector3> temp_created_chunks;
 

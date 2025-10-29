@@ -17,7 +17,7 @@ enum class PolygonizeTaskArg : uint8
 
 enum class CreationTaskArg : uint8
 {
-	None = 0,
+	Update = 0,
 	NewlyCreated = 1,
 	ModifyOperation = 2
 };
@@ -25,7 +25,7 @@ enum class CreationTaskArg : uint8
 struct DUALCONTOURINGTERRAIN_API ChunkCreationResult
 {
 	FIntVector3 chunk_coord;
-	CreationTaskArg task_arg = CreationTaskArg::None;
+	bool chunk_update = false;
 	TUniquePtr<OctreeNode> created_root = nullptr;
 	TArray<float> noise_field;
 
@@ -59,8 +59,8 @@ public:
 
 	TUniquePtr<struct OctreeNode> root = nullptr;
 	FVector3f center;
-	bool newly_created = false;
-	bool had_section_built = true;
+	bool rmc_newly_created = false;
+	bool has_section_built = false;
 	uint8 ping_counter = 0;
 	URealtimeMeshSimple* mesh = nullptr;
 	TArray<float> noise_field;

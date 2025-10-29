@@ -43,7 +43,7 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 	Params.bNoFail = true;
 
 #if WITH_EDITOR
-	Params.bHideFromSceneOutliner = true;
+	//Params.bHideFromSceneOutliner = true;
 #endif
 
 	ADC_OctreeRenderActor* created_render_actor = GetWorld()->SpawnActor<ADC_OctreeRenderActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
@@ -63,8 +63,6 @@ void UChunkProvider::Initialize(FSubsystemCollectionBase& Collection)
 
 		render_actor = created_render_actor;
 	}
-
-
 
 	Init(false);
 }
@@ -262,7 +260,7 @@ void UChunkProvider::EditNoiseField(TArray<float>& noise, const FVector3f& cente
 
 		FVector3f local_pos = point_pos - (sdf_op.position * 0.01f);
 
-		float sdf_val;
+		float sdf_val = 0.f;
 		switch (sdf_op.sdf_type)
 		{
 		case SDFType::Box:
@@ -348,18 +346,19 @@ void UChunkProvider::CreateChunk(FIntVector3 coord)
 {
 	checkSlow(!chunk_grid.chunks.Contains(coord));
 
-	URealtimeMeshSimple* fetched_mesh;
-	bool newly_created = render_actor->FetchRMComponentMesh(fetched_mesh, chunk_settings->terrain_material.Get());
+	auto info  = render_actor->FetchRMComponentInfo(chunk_settings->terrain_material.Get());
 
 	float size = chunk_settings->chunk_size;
 
 	Chunk chunk;
 	chunk.center = FVector3f(coord.X * size + size * 0.5f, coord.Y * size + size * 0.5f, coord.Z * size + size * 0.5f);
-	chunk.mesh = fetched_mesh;
+	chunk.mesh = info.mesh;
+	chunk.rmc_newly_created = !info.pooled;
+	chunk.has_section_built = info.has_section;
 
 	chunk_grid.chunks.Add(coord, MoveTemp(chunk));
 
-	CreationTaskArg task_arg = newly_created ? CreationTaskArg::NewlyCreated : CreationTaskArg::None;
+	CreationTaskArg task_arg = info.pooled ? CreationTaskArg::NewlyCreated : CreationTaskArg::Update;
 
 	//building octree job
 	chunk_grid.chunk_creation_jobs.Enqueue(MakeTuple(coord, task_arg));
@@ -484,7 +483,7 @@ void UChunkProvider::DrainChunkBuildQueues()
 
 			chunk_grid.GetMutable(tuple.Key).sdf_ops.Add(op);
 
-			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
+			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, op, &noise_field = chunk.noise_field, &sdf_ops = chunk.sdf_ops]() -> ChunkCreationResult
 				{
 					ChunkCreationResult result;
 					result.chunk_coord = coord;
@@ -492,20 +491,20 @@ void UChunkProvider::DrainChunkBuildQueues()
 					EditNoiseField(noise_field, chunk_center, size, settings_context.max_depth, op);
 
 					result.created_root = UOctreeCode::RebuildOctree(chunk_center, size, settings_context, noise_field, sdf_ops);
-					result.task_arg = task_arg;
+					result.chunk_update = true;
 
 					return result;
 				}));
 		}
 		else
 		{
-			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context, task_arg]() -> ChunkCreationResult
+			chunk_grid.chunk_creation_tasks.Add(AsyncPool(*thread_pool, [this, coord = tuple.Key, chunk_center, size, settings_context]() -> ChunkCreationResult
 				{
 					ChunkCreationResult result;
 					result.chunk_coord = coord;
 					result.noise_field = BuildNoiseField(chunk_center, size, settings_context.max_depth, settings_context.seed);
 					result.created_root = UOctreeCode::BuildOctree(chunk_center, size, settings_context, result.noise_field);
-					result.task_arg = task_arg;
+					result.chunk_update = false;
 
 					return result;
 				}));
@@ -520,9 +519,9 @@ void UChunkProvider::DrainChunkBuildQueues()
 
 			Chunk& chunk = chunk_grid.GetMutable(creation_result.chunk_coord);
 			chunk.root = MoveTemp(creation_result.created_root);
-			chunk.newly_created = creation_result.task_arg == CreationTaskArg::NewlyCreated;
+			//chunk.rmc_newly_created = creation_result.task_arg == CreationTaskArg::NewlyCreated;
 
-			if (creation_result.task_arg != CreationTaskArg::ModifyOperation)
+			if (!creation_result.chunk_update)
 			{
 				chunk.noise_field = MoveTemp(creation_result.noise_field);
 			}
@@ -625,7 +624,8 @@ void UChunkProvider::DrainChunkBuildQueues()
 				bool negative_delta = (task_arg == PolygonizeTaskArg::SlabNegative);
 
 				OctreeNode* root = chunk.root.Get();
-				bool newly_created = chunk.newly_created;
+				bool rmc_newly_created = chunk.rmc_newly_created;
+				bool has_section_built = chunk.has_section_built;
 
 				TArray<OctreeNode*, TInlineAllocator<8>> seam_octants;
 				seam_octants.SetNumUninitialized(8);
@@ -640,7 +640,7 @@ void UChunkProvider::DrainChunkBuildQueues()
 					FillSeamOctreeNodes(ec_seam_octants, !negative_delta, coord, root);
 
 					chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
-						[this,coord, negative_delta, seam_octants, ec_seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
+						[this, coord, negative_delta, seam_octants, ec_seam_octants, chunk_mesh, rmc_newly_created, has_section_built]() -> ChunkPolygonizeResult
 						{
 							ChunkPolygonizeResult result;
 							result.chunk_coord = coord;
@@ -652,13 +652,13 @@ void UChunkProvider::DrainChunkBuildQueues()
 							FRealtimeMeshStreamKey key = stream_set.GetStreamKeys().Get(FSetElementId::FromInteger(0));
 							//create / update mesh section of chunk
 							int32 idx_num = stream_set.Find(key)->Num();
-							if (idx_num < 3 || !chunk_mesh)
+							if (idx_num < 3)
 							{
 								result.rm_aborted = true;
 							}
 							else
 							{
-								if (newly_created)
+								if (rmc_newly_created || !has_section_built)
 								{
 									result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
 								}
@@ -678,7 +678,7 @@ void UChunkProvider::DrainChunkBuildQueues()
 				else
 				{
 					chunk_grid.chunk_polygonize_tasks.Add(AsyncPool(*thread_pool,
-						[this, coord, negative_delta, seam_octants, chunk_mesh, newly_created]() -> ChunkPolygonizeResult
+						[this, coord, negative_delta, seam_octants, chunk_mesh, rmc_newly_created, has_section_built]() -> ChunkPolygonizeResult
 						{
 							ChunkPolygonizeResult result;
 							result.chunk_coord = coord;
@@ -697,9 +697,11 @@ void UChunkProvider::DrainChunkBuildQueues()
 							else 
 							{
 								//create / update mesh section of chunk
-								if (newly_created)
+								if (rmc_newly_created || !has_section_built)
 								{
-									result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set));
+									FRealtimeMeshSectionGroupConfig config;
+									config.DrawType = ERealtimeMeshSectionDrawType::Dynamic;
+									result.mesh_future = chunk_mesh->CreateSectionGroup(mesh_group_key, MoveTemp(stream_set), config);
 								}
 								else
 								{
@@ -722,8 +724,8 @@ void UChunkProvider::DrainChunkBuildQueues()
 			}
 			else 
 			{
-				ReleaseChunkMesh(chunk, false);
-				chunk.had_section_built = false;
+				chunk.has_section_built = false;
+				ReleaseChunkMesh(chunk);
 			}
 		}
 	}
@@ -736,8 +738,9 @@ void UChunkProvider::DrainChunkBuildQueues()
 			if(polygonize_result.rm_aborted)
 			{
 				Chunk& chunk = chunk_grid.GetMutable(polygonize_result.chunk_coord);
-				
-				ReleaseChunkMesh(chunk, false);
+				chunk.has_section_built = false;
+
+				ReleaseChunkMesh(chunk);
 
 				chunk_grid.chunk_polygonize_tasks.RemoveAt(i);
 				i--;
@@ -757,19 +760,18 @@ void UChunkProvider::DrainChunkBuildQueues()
 
 }
 
-void UChunkProvider::ReleaseChunkMesh(Chunk& chunk, bool had_section_built)
+void UChunkProvider::ReleaseChunkMesh(Chunk& chunk)
 {
+	//if chunk mesh was already released
 	if(!chunk.mesh) return;
 
 	auto rmc = static_cast<URealtimeMeshComponent*>(chunk.mesh->GetOuter());
-	render_actor->ReleaseRMC(rmc, had_section_built);
+	render_actor->ReleaseRMC(rmc, chunk.has_section_built);
 	chunk.mesh = nullptr;
 }
 
 FVector UChunkProvider::GetActiveCameraLocation()
 {
-	//return test_follow_actor->GetActorLocation();
-
 	#if WITH_EDITOR
 		if (GEditor->IsPlaySessionInProgress())
 		{
@@ -946,9 +948,7 @@ void UChunkProvider::Tick(float DeltaTime)
 
 				if (chunk.ping_counter >= chunk_settings->chunk_ping_deletion_at)
 				{
-					Chunk& removed_chunk = chunk_grid.GetMutable(pair.Key);
-
-					ReleaseChunkMesh(removed_chunk, chunk.had_section_built);
+					ReleaseChunkMesh(chunk);
 
 					cleanup_chunks.Add(pair.Key);
 				}

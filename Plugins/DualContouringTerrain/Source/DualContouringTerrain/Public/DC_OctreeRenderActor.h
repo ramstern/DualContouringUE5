@@ -19,12 +19,19 @@ public:
 	// Sets default values for this actor's properties
 	ADC_OctreeRenderActor();
 
+	struct FetchInfo
+	{
+		URealtimeMeshSimple* mesh;
+		bool pooled;
+		bool has_section;
+	};
+
 	//returns whether the mesh and its rmc were newly created, instead of pooled
-	bool FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh, UMaterialInterface* material_interface);
+	FetchInfo FetchRMComponentInfo(UMaterialInterface* material_interface);
 
 	void DestroyAllRMCs();
 
-	void ReleaseRMC(URealtimeMeshComponent*& component, bool had_section_built = true);
+	void ReleaseRMC(URealtimeMeshComponent*& component, bool had_section_built);
 
 protected:
 	// Called when the game starts or when spawned

@@ -1359,7 +1359,7 @@ FVector3f UOctreeCode::FDMGetNormal_SDF(const FVector3f& at_point, float h, int3
 
 			FVector3f local_pos = pos - (sdf_op.position*0.01f);
 			
-			float sdf_val;
+			float sdf_val = 0.f;
 			switch (sdf_op.sdf_type)
 			{
 			case SDFType::Box:

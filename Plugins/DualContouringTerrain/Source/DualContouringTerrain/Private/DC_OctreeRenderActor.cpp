@@ -18,11 +18,9 @@ ADC_OctreeRenderActor::ADC_OctreeRenderActor()
 	//mesh_component->bCastShadowAsTwoSided = true;
 }
 
-bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh, UMaterialInterface* material_interface)
+ADC_OctreeRenderActor::FetchInfo ADC_OctreeRenderActor::FetchRMComponentInfo(UMaterialInterface* material_interface)
 {
-	//check(IsInGameThread());
-
-	//UE_LOG(LogTemp, Display, TEXT(" chunk section count: %i, rmcs count: %i"), chunks_with_sections.Num(), rmcs.Num());
+	FetchInfo info;
 
 	//no available rmc's, create and add new one
 	if(reuse_indices.IsEmpty())
@@ -41,31 +39,33 @@ bool ADC_OctreeRenderActor::FetchRMComponentMesh(URealtimeMeshSimple*& out_mesh,
 		rmc->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
 		rmc->SetCanEverAffectNavigation(false);
 
-		out_mesh = rmc->InitializeRealtimeMesh<URealtimeMeshSimple>();
+		info.mesh = rmc->InitializeRealtimeMesh<URealtimeMeshSimple>();
 		FRealtimeMeshCollisionConfiguration config = FRealtimeMeshCollisionConfiguration();
-		out_mesh->SetCollisionConfig(config);
+		info.mesh->SetCollisionConfig(config);
 
-		out_mesh->ClearFlags(RF_Transactional);
-		out_mesh->SetFlags(RF_Transient);
-		out_mesh->SetupMaterialSlot(0, "PrimaryMaterial", material_interface);
+		info.mesh->ClearFlags(RF_Transactional);
+		info.mesh->SetFlags(RF_Transient);
+		info.mesh->SetupMaterialSlot(0, "PrimaryMaterial", material_interface);
 
 		rmc->SetupAttachment(RootComponent);
 
 		rmc->RegisterComponent();
 
-		return true;
+		info.has_section = false;
+		info.pooled = false;
+		return info;
 	}
 	
 	int32 idx;
 	reuse_indices.Dequeue(idx);
 
-	bool had_section_built = chunks_with_sections.FindAndRemoveChecked(idx);
+	info.has_section = chunks_with_sections.FindAndRemoveChecked(idx);
+	info.pooled = true;
 
 	URealtimeMeshComponent* rmc = rmcs[idx];
-	out_mesh = rmc->GetRealtimeMeshAs<URealtimeMeshSimple>();
-
-	if(!had_section_built) return true;
-	return false;	
+	info.mesh = rmc->GetRealtimeMeshAs<URealtimeMeshSimple>();
+	
+	return info;	
 }
 
 
